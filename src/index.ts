@@ -20,7 +20,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.1.9";
+const VERSION = "0.2.0";
 
 const program = new Command();
 
@@ -240,20 +240,94 @@ program
   .command("config")
   .description("Show detected OpenClaw configuration")
   .option("--json", "Output as JSON")
-  .action((opts) => {
+  .option("--diag", "Run diagnostics: check paths, db row counts, daemon log tail")
+  .action(async (opts) => {
     const cfg = resolveConfig();
     if (opts.json) {
       console.log(JSON.stringify({ openclawDir: cfg.openclawDir, workspaceDir: cfg.workspaceDir, sessionsDir: cfg.sessionsDir, bootstrapMaxChars: cfg.bootstrapMaxChars, probeDir: cfg.probeDir, openclaw: cfg.openclaw }, null, 2));
-    } else {
-      console.log(`OpenClaw dir:      ${cfg.openclawDir}`);
-      console.log(`Workspace:         ${cfg.workspaceDir}`);
-      console.log(`Sessions:          ${cfg.sessionsDir}`);
-      console.log(`Bootstrap max:     ${cfg.bootstrapMaxChars.toLocaleString()} chars`);
-      console.log(`probe.db:          ${cfg.probeDir}/probe.db`);
-      const model = cfg.openclaw.models?.default;
-      if (model) console.log(`Default model:     ${model}`);
-      const engine = cfg.openclaw.plugins?.slots?.contextEngine;
-      if (engine) console.log(`Context engine:    ${engine}`);
+      return;
+    }
+    console.log(`OpenClaw dir:      ${cfg.openclawDir}`);
+    console.log(`Workspace:         ${cfg.workspaceDir}`);
+    console.log(`Sessions:          ${cfg.sessionsDir}`);
+    console.log(`Bootstrap max:     ${cfg.bootstrapMaxChars.toLocaleString()} chars`);
+    console.log(`probe.db:          ${cfg.probeDir}/probe.db`);
+    const model = cfg.openclaw.models?.default;
+    if (model) console.log(`Default model:     ${model}`);
+    const engine = cfg.openclaw.plugins?.slots?.contextEngine;
+    if (engine) console.log(`Context engine:    ${engine}`);
+
+    if (opts.diag) {
+      const { existsSync, readdirSync, readFileSync, statSync } = await import("fs");
+      const chalk = (await import("chalk")).default;
+      const { openDb } = await import("./core/db.js");
+      const { readSessionsStore, listJsonlFiles } = await import("./core/session-store.js");
+
+      console.log("\n" + chalk.bold("── Diagnostics ─────────────────────────────────────"));
+
+      const check = (label: string, p: string) => {
+        const ok = existsSync(p);
+        console.log(`  ${ok ? chalk.green("✓") : chalk.red("✗")} ${label}: ${p}`);
+        return ok;
+      };
+
+      check("openclawDir ", cfg.openclawDir);
+      const sessOk = check("sessionsDir ", cfg.sessionsDir);
+      check("workspaceDir", cfg.workspaceDir);
+      check("probeDir    ", cfg.probeDir);
+
+      if (sessOk) {
+        const jsonlFiles = listJsonlFiles(cfg.sessionsDir);
+        console.log(`\n  .jsonl transcript files found: ${jsonlFiles.length}`);
+        jsonlFiles.slice(0, 5).forEach(f => console.log(`    - ${f}`));
+
+        const sessJsonPath = `${cfg.sessionsDir}/sessions.json`;
+        if (existsSync(sessJsonPath)) {
+          const sessions = readSessionsStore(cfg.sessionsDir);
+          console.log(`  sessions.json: ${sessions.length} session(s) parsed`);
+          sessions.slice(0, 3).forEach(s => {
+            console.log(`    • ${s.sessionKey}  in=${s.inputTokens} out=${s.outputTokens} ctx=${s.contextTokens}`);
+          });
+        } else {
+          console.log(`  ${chalk.red("✗")} sessions.json not found at ${sessJsonPath}`);
+        }
+      }
+
+      // DB stats
+      const dbPath = `${cfg.probeDir}/probe.db`;
+      if (existsSync(dbPath)) {
+        try {
+          const db = openDb(cfg.probeDir);
+          const snapCount = (db.prepare("SELECT COUNT(*) as n FROM session_snapshots").get() as { n: number }).n;
+          const fileCount = (db.prepare("SELECT COUNT(*) as n FROM file_snapshots").get() as { n: number }).n;
+          console.log(`\n  probe.db row counts:`);
+          console.log(`    session_snapshots: ${snapCount}`);
+          console.log(`    file_snapshots:    ${fileCount}`);
+          if (snapCount === 0) {
+            console.log(`\n  ${chalk.yellow("⚠")} session_snapshots is empty.`);
+            console.log(`    Possible causes:`);
+            console.log(`    1. Daemon hasn't finished its initial scan yet`);
+            console.log(`    2. sessionsDir doesn't exist or sessions.json is empty/missing`);
+            console.log(`    3. Daemon crashed on startup — check: cat ~/.clawprobe/daemon.log`);
+          }
+        } catch (e) {
+          console.log(`  ${chalk.red("✗")} Could not open probe.db: ${e}`);
+        }
+      } else {
+        console.log(`\n  ${chalk.red("✗")} probe.db not found — daemon may never have started successfully`);
+      }
+
+      // Tail daemon.log
+      const daemonLog = `${cfg.probeDir}/daemon.log`;
+      if (existsSync(daemonLog)) {
+        const content = readFileSync(daemonLog, "utf-8").trim();
+        const lines = content.split("\n");
+        const tail = lines.slice(-20).join("\n");
+        console.log(`\n  Last 20 lines of daemon.log:\n`);
+        console.log(tail.split("\n").map(l => "    " + l).join("\n"));
+      } else {
+        console.log(`\n  daemon.log not found at ${daemonLog}`);
+      }
     }
   });
 

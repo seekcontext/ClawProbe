@@ -39,16 +39,36 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
   const db = openDb(cfg.probeDir);
   const agent = cfg.probe.openclaw.agent;
 
-  console.log(`✓ clawprobe daemon started`);
-  console.log(`✓ Watching: ${cfg.openclawDir}`);
+  console.log(`✓ clawprobe daemon started  [${new Date().toISOString()}]`);
+  console.log(`  openclawDir: ${cfg.openclawDir}`);
+  console.log(`  sessionsDir: ${cfg.sessionsDir}`);
+  console.log(`  probeDir:    ${cfg.probeDir}`);
+  console.log(`  agent:       ${agent}`);
+
+  // Verify sessionsDir exists
+  if (!fs.existsSync(cfg.sessionsDir)) {
+    console.error(`[daemon] WARNING: sessionsDir does not exist: ${cfg.sessionsDir}`);
+    console.error(`[daemon] Token snapshots will not be written until this directory is created.`);
+  }
 
   // Initial scan of all existing .jsonl files
-  for (const jsonlPath of listJsonlFiles(cfg.sessionsDir)) {
-    await processJsonlFile(cfg, agent, jsonlPath, true);
+  const jsonlFiles = listJsonlFiles(cfg.sessionsDir);
+  console.log(`[daemon] Found ${jsonlFiles.length} .jsonl transcript(s) to scan`);
+  for (const jsonlPath of jsonlFiles) {
+    try {
+      await processJsonlFile(cfg, agent, jsonlPath, true);
+    } catch (err) {
+      console.error(`[daemon] Error scanning ${jsonlPath}:`, err);
+    }
   }
 
   // Initial snapshot of sessions.json
-  await processSessionsJson(cfg, agent);
+  try {
+    const sessionCount = await processSessionsJson(cfg, agent);
+    console.log(`[daemon] Snapshotted ${sessionCount} session(s) from sessions.json`);
+  } catch (err) {
+    console.error(`[daemon] Error reading sessions.json:`, err);
+  }
 
   // Initial workspace snapshot
   snapshotWorkspaceFiles(db, agent, cfg.workspaceDir, cfg.bootstrapMaxChars);
@@ -68,11 +88,13 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
     try {
       switch (change.category) {
         case "sessions_json":
+          console.log(`[daemon] sessions.json changed, re-reading...`);
           await processSessionsJson(cfg, agent);
           runAndPersistRules(cfg, agent);
           break;
 
         case "jsonl":
+          console.log(`[daemon] .jsonl changed: ${change.filePath}`);
           await processJsonlFile(cfg, agent, change.filePath, false);
           runAndPersistRules(cfg, agent);
           break;
@@ -111,7 +133,7 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
 async function processSessionsJson(
   cfg: ResolvedConfig,
   agent: string
-): Promise<void> {
+): Promise<number> {
   const db = openDb(cfg.probeDir);
   const sessions = readSessionsStore(cfg.sessionsDir);
   const now = Math.floor(Date.now() / 1000);
@@ -154,6 +176,8 @@ async function processSessionsJson(
       }
     }
   }
+
+  return sessions.length;
 }
 
 async function processJsonlFile(
