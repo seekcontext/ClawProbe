@@ -1,6 +1,5 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 import { spawn } from "child_process";
-import { createWriteStream } from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Command } from "commander";
@@ -21,7 +20,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.1.4";
+const VERSION = "0.1.5";
 
 const program = new Command();
 
@@ -53,13 +52,12 @@ program
       return;
     }
 
-    // Spawn detached daemon and exit (nohup-style)
+    // Spawn detached daemon and exit (nohup-style). Daemon writes its own logs to daemon.log.
     const entryPath = fileURLToPath(import.meta.url);
     const daemonLogPath = path.join(cfg.probeDir, "daemon.log");
-    const logStream = createWriteStream(daemonLogPath, { flags: "a" });
     const child = spawn(process.execPath, [entryPath, "start"], {
       detached: true,
-      stdio: ["ignore", logStream, logStream],
+      stdio: "ignore",
       env: { ...process.env, CLAWPROBE_DAEMON: "1" },
       cwd: process.cwd(),
     });

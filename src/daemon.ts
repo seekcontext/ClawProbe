@@ -1,3 +1,4 @@
+import fs from "fs";
 import path from "path";
 import { ResolvedConfig } from "./core/config.js";
 import { openDb, insertSessionSnapshot } from "./core/db.js";
@@ -12,7 +13,29 @@ import { upsertCompactEvent } from "./core/db.js";
 
 let watcher: FileWatcher | null = null;
 
+/** Redirect stdout/stderr to daemon.log when running as detached child (stdio is ignored). */
+function redirectStdioToLogFile(probeDir: string): void {
+  const logPath = path.join(probeDir, "daemon.log");
+  const stream = fs.createWriteStream(logPath, { flags: "a" });
+  const write = (chunk: unknown, encoding?: unknown, callback?: unknown): boolean => {
+    const cb = typeof encoding === "function" ? encoding : typeof callback === "function" ? callback : undefined;
+    const enc = (typeof encoding === "string" ? encoding : "utf8") as BufferEncoding;
+    if (cb !== undefined) {
+      stream.write(String(chunk), enc, cb as (err: Error | null | undefined) => void);
+    } else {
+      stream.write(String(chunk), enc);
+    }
+    return true;
+  };
+  (process.stdout as NodeJS.WritableStream).write = write;
+  (process.stderr as NodeJS.WritableStream).write = write;
+}
+
 export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
+  if (process.env.CLAWPROBE_DAEMON === "1") {
+    redirectStdioToLogFile(cfg.probeDir);
+  }
+
   const db = openDb(cfg.probeDir);
   const agent = cfg.probe.openclaw.agent;
 
