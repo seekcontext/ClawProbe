@@ -56,6 +56,9 @@ program
       return;
     }
 
+    // Ensure probeDir exists before spawning daemon (daemon can't create it when stdio is ignored)
+    fs.mkdirSync(cfg.probeDir, { recursive: true });
+
     // Spawn detached daemon and exit (nohup-style). Daemon writes its own logs to daemon.log.
     const entryPath = fileURLToPath(import.meta.url);
     const daemonLogPath = path.join(cfg.probeDir, "daemon.log");
