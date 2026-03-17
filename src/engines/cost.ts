@@ -7,6 +7,7 @@ import {
   getAllSnapshots,
   upsertCostRecord,
 } from "../core/db.js";
+import type { SessionEntry } from "../core/session-store.js";
 
 // USD per 1M tokens
 export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
@@ -148,6 +149,33 @@ export function getSessionCost(
     compactionCount: last.compaction_count,
     costAccurate: snapshots.length > 1,
     turns,
+  };
+}
+
+/**
+ * Synthesise a SessionCost directly from a sessions.json entry (no db snapshots).
+ * costAccurate is false because we only have the cumulative total, not per-turn deltas.
+ */
+export function sessionCostFromEntry(
+  entry: SessionEntry,
+  customPrices: Record<string, { input: number; output: number }> = {}
+): SessionCost {
+  const model = entry.modelOverride ?? null;
+  const usd = estimateCost({ input: entry.inputTokens, output: entry.outputTokens }, model, customPrices);
+  return {
+    sessionKey: entry.sessionKey,
+    model,
+    provider: entry.providerOverride ?? null,
+    inputTokens: entry.inputTokens,
+    outputTokens: entry.outputTokens,
+    totalTokens: entry.totalTokens,
+    estimatedUsd: usd,
+    startedAt: entry.updatedAt,
+    lastActiveAt: entry.updatedAt,
+    durationMin: 0,
+    compactionCount: entry.compactionCount,
+    costAccurate: false,
+    turns: [],
   };
 }
 

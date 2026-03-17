@@ -20,7 +20,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.1.8";
+const VERSION = "0.1.9";
 
 const program = new Command();
 

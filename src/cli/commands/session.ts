@@ -1,7 +1,7 @@
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb, getAllSessionKeys } from "../../core/db.js";
-import { getActiveSession } from "../../core/session-store.js";
-import { getSessionCost, getAllSessionCosts, estimateCost } from "../../engines/cost.js";
+import { getActiveSession, readSessionsStore } from "../../core/session-store.js";
+import { getSessionCost, getAllSessionCosts, estimateCost, sessionCostFromEntry } from "../../engines/cost.js";
 import {
   header, fmtUsd, fmtTokens, fmtDate, fmtDuration, makeTable, outputJson,
   severity, roleIcon, divider,
@@ -24,7 +24,13 @@ export async function runSession(
   const customPrices = cfg.probe.cost.customPrices;
 
   if (opts.list) {
-    const costs = getAllSessionCosts(db, agent, customPrices);
+    // Start with db-backed costs, then merge in any sessions.json entries not yet in db.
+    const dbCosts = getAllSessionCosts(db, agent, customPrices);
+    const dbKeys = new Set(dbCosts.map((c) => c.sessionKey));
+    const liveEntries = readSessionsStore(cfg.sessionsDir)
+      .filter((e) => !dbKeys.has(e.sessionKey))
+      .map((e) => sessionCostFromEntry(e, customPrices));
+    const costs = [...dbCosts, ...liveEntries].sort((a, b) => b.lastActiveAt - a.lastActiveAt);
     const active = getActiveSession(cfg.sessionsDir);
 
     if (opts.json) {
@@ -71,10 +77,17 @@ export async function runSession(
     targetKey = active.sessionKey;
   }
 
-  const cost = getSessionCost(db, agent, targetKey, customPrices);
+  // Try db snapshots first; fall back to live sessions.json entry.
+  let cost = getSessionCost(db, agent, targetKey, customPrices);
+  if (!cost) {
+    const liveEntry = readSessionsStore(cfg.sessionsDir).find((e) => e.sessionKey === targetKey);
+    if (liveEntry) {
+      cost = sessionCostFromEntry(liveEntry, customPrices);
+    }
+  }
   if (!cost) {
     console.error(severity.critical(`No data found for session: ${targetKey}`));
-    console.log(severity.muted("  clawprobe must be running (daemon) to collect session data."));
+    console.log(severity.muted("  Start the daemon with: clawprobe start"));
     process.exit(1);
   }
 
@@ -94,7 +107,11 @@ export async function runSession(
   console.log(`  Compactions: ${cost.compactionCount}`);
 
   if (!cost.costAccurate) {
-    console.log(severity.muted("  ⚠ Cost may be understated (clawprobe was not running at session start)"));
+    if (cost.turns.length === 0) {
+      console.log(severity.warning("  ⚠ Showing live data from sessions.json (daemon not running — no per-turn breakdown)"));
+    } else {
+      console.log(severity.muted("  ⚠ Cost may be understated (clawprobe was not running at session start)"));
+    }
   }
 
   console.log();
