@@ -108,21 +108,27 @@ export function getSessionCost(
 
   const first = snapshots[0]!;
   const last = snapshots[snapshots.length - 1]!;
-
-  const inputDelta = last.input_tokens - first.input_tokens;
-  const outputDelta = last.output_tokens - first.output_tokens;
   const model = last.model ?? first.model;
+
+  // Each snapshot stores *cumulative* token totals reported by the agent runtime.
+  // The session's total consumption is simply the latest snapshot's absolute value.
+  // We fall back to (last - first) deltas only for the turn-by-turn breakdown,
+  // where consecutive snapshots represent incremental sampling points.
+  const totalInput = last.input_tokens;
+  const totalOutput = last.output_tokens;
 
   const turns: TurnCost[] = [];
   for (let i = 1; i < snapshots.length; i++) {
     const prev = snapshots[i - 1]!;
     const curr = snapshots[i]!;
-    const inDelta = curr.input_tokens - prev.input_tokens;
-    const outDelta = curr.output_tokens - prev.output_tokens;
+    // Only count turns where tokens actually increased (skip re-snapshots with same values)
+    const inDelta = Math.max(0, curr.input_tokens - prev.input_tokens);
+    const outDelta = Math.max(0, curr.output_tokens - prev.output_tokens);
+    if (inDelta === 0 && outDelta === 0) continue;
     const compactOccurred = curr.compaction_count > prev.compaction_count;
 
     turns.push({
-      turnIndex: i,
+      turnIndex: turns.length + 1,
       timestamp: curr.sampled_at,
       inputTokensDelta: inDelta,
       outputTokensDelta: outDelta,
@@ -135,19 +141,16 @@ export function getSessionCost(
     sessionKey,
     model,
     provider: last.provider ?? first.provider,
-    inputTokens: Math.max(0, inputDelta),
-    outputTokens: Math.max(0, outputDelta),
-    totalTokens: Math.max(0, inputDelta + outputDelta),
-    estimatedUsd: estimateCost(
-      { input: Math.max(0, inputDelta), output: Math.max(0, outputDelta) },
-      model,
-      customPrices
-    ),
+    inputTokens: totalInput,
+    outputTokens: totalOutput,
+    totalTokens: totalInput + totalOutput,
+    estimatedUsd: estimateCost({ input: totalInput, output: totalOutput }, model, customPrices),
     startedAt: first.sampled_at,
     lastActiveAt: last.sampled_at,
     durationMin: Math.round((last.sampled_at - first.sampled_at) / 60),
     compactionCount: last.compaction_count,
-    costAccurate: snapshots.length > 1,
+    // costAccurate means we have the real cumulative totals (always true when we have snapshots)
+    costAccurate: true,
     turns,
   };
 }
