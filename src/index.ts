@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 import { Command } from "commander";
 import { resolveConfig, assertOpenClawExists } from "./core/config.js";
 import { startDaemon } from "./daemon.js";
@@ -17,7 +17,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.2";
 
 const program = new Command();
 
