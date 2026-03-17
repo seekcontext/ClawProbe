@@ -20,7 +20,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.2.6";
+const VERSION = "0.2.7";
 
 const program = new Command();
 
@@ -320,9 +320,10 @@ program
           // Show UUID→sessionKey mapping from jsonl files
           console.log(`\n  jsonl UUID → sessionKey mapping (first 5):`);
           const { findJsonlPath } = await import("./core/session-store.js");
+          const { basename: pathBasename } = await import("path");
           for (const s of sessions.slice(0, 5)) {
             const p = findJsonlPath(cfg.sessionsDir, s);
-            const uuidFile = p ? require("path").basename(p) : chalk.red("NOT FOUND");
+            const uuidFile = p ? pathBasename(p) : chalk.red("NOT FOUND");
             console.log(`    ${s.sessionKey.slice(0, 40)} → ${uuidFile}`);
           }
         } else {

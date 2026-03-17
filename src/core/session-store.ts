@@ -4,6 +4,8 @@ import path from "path";
 export interface SessionEntry {
   sessionId: string;
   sessionKey: string;
+  /** Path or UUID of the .jsonl transcript (from sessionFile field in sessions.json) */
+  sessionFile?: string;
   updatedAt: number;
   inputTokens: number;
   outputTokens: number;
@@ -30,6 +32,8 @@ export interface SessionsStore {
 // OpenClaw may write camelCase or snake_case; some versions nest under state/metrics.
 interface RawSessionEntry {
   sessionId?: string;
+  /** Path or UUID of the .jsonl transcript file (OpenClaw runtime field) */
+  sessionFile?: string;
   updatedAt?: number;
   inputTokens?: number;
   outputTokens?: number;
@@ -45,6 +49,9 @@ interface RawSessionEntry {
   memoryFlushAt?: number;
   modelOverride?: string;
   providerOverride?: string;
+  // Direct model/provider fields (used by some OpenClaw versions instead of modelOverride)
+  model?: string;
+  modelProvider?: string;
   // snake_case (e.g. OpenClaw runtime)
   input_tokens?: number;
   output_tokens?: number;
@@ -122,10 +129,15 @@ function normalizeEntry(
   }
 
   const sessionId = (getFirst(sources, "sessionId", "session_id") as string | undefined) ?? sessionKey;
+  const sessionFile = raw.sessionFile as string | undefined;
+  // Support direct model/modelProvider fields in addition to modelOverride/providerOverride
+  const modelOverride = (raw.modelOverride ?? raw.model_override ?? raw.model) as string | undefined;
+  const providerOverride = (raw.providerOverride ?? raw.provider_override ?? raw.modelProvider) as string | undefined;
 
   return {
     sessionKey,
     sessionId,
+    sessionFile,
     updatedAt,
     inputTokens,
     outputTokens,
@@ -135,8 +147,8 @@ function normalizeEntry(
     contextTokens,
     compactionCount,
     memoryFlushAt: (raw.memoryFlushAt ?? raw.memory_flush_at) as number | undefined,
-    modelOverride: (raw.modelOverride ?? raw.model_override) as string | undefined,
-    providerOverride: (raw.providerOverride ?? raw.provider_override) as string | undefined,
+    modelOverride,
+    providerOverride,
   };
 }
 
@@ -232,7 +244,18 @@ function buildUuidToPathMap(sessionsDir: string): Map<string, string> {
  *    file whose session.id appears as any string value in the entry's raw data
  */
 export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string | null {
-  // Strategy 1: sessionId looks like a UUID — use it directly as filename
+  // Strategy 1a: sessionFile field (OpenClaw writes the UUID path here directly)
+  if (entry.sessionFile) {
+    // sessionFile may be a full path or just the UUID filename
+    if (fs.existsSync(entry.sessionFile)) return entry.sessionFile;
+    const basename = path.basename(entry.sessionFile);
+    // Strip any extension variants and try as plain UUID
+    const uuid = basename.replace(/\.jsonl.*$/, "");
+    const p = path.join(sessionsDir, `${uuid}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+
+  // Strategy 1b: sessionId looks like a UUID — use it directly as filename
   if (entry.sessionId && UUID_RE.test(entry.sessionId)) {
     const p = path.join(sessionsDir, `${entry.sessionId}.jsonl`);
     if (fs.existsSync(p)) return p;
@@ -244,11 +267,10 @@ export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string 
     if (fs.existsSync(p)) return p;
   }
 
-  // Strategy 3 & 4: Use cached UUID→path map.
-  // Try to match any UUID-like value in the entry against known jsonl session IDs.
+  // Strategy 3: Use cached UUID→path map (reads first line of each jsonl).
+  // Match sessionId or sessionKey against the session header id in each file.
   const uuidMap = buildUuidToPathMap(sessionsDir);
 
-  // Check sessionId and sessionKey against the uuid map
   if (entry.sessionId && uuidMap.has(entry.sessionId)) {
     return uuidMap.get(entry.sessionId)!;
   }
@@ -256,9 +278,6 @@ export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string 
     return uuidMap.get(entry.sessionKey)!;
   }
 
-  // Last resort: the most recently modified jsonl file (for the active session case).
-  // Only use this if there's exactly one candidate and the entry is the active session.
-  // (We don't have enough info to match otherwise without reading sessions.json raw again.)
   return null;
 }
 
