@@ -366,9 +366,13 @@ program
           const db = openDb(cfg.probeDir);
           const snapCount = (db.prepare("SELECT COUNT(*) as n FROM session_snapshots").get() as { n: number }).n;
           const fileCount = (db.prepare("SELECT COUNT(*) as n FROM file_snapshots").get() as { n: number }).n;
+          const costCount = (db.prepare("SELECT COUNT(*) as n FROM cost_records").get() as { n: number }).n;
+          const compactCount = (db.prepare("SELECT COUNT(*) as n FROM compact_events").get() as { n: number }).n;
           console.log(`\n  probe.db row counts:`);
           console.log(`    session_snapshots: ${snapCount}`);
           console.log(`    file_snapshots:    ${fileCount}`);
+          console.log(`    cost_records:      ${costCount}`);
+          console.log(`    compact_events:    ${compactCount}`);
           if (snapCount === 0) {
             console.log(`\n  ${chalk.yellow("⚠")} session_snapshots is empty.`);
             console.log(`    Possible causes:`);

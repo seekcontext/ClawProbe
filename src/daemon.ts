@@ -159,21 +159,30 @@ async function processSessionsJson(
     });
 
     // Record daily cost from jsonl transcript (most accurate source)
-    const jsonlPath = findJsonlPath(cfg.sessionsDir, session);
-    if (jsonlPath) {
-      const stats = parseSessionStats(jsonlPath);
-      if (stats && stats.totalOutput > 0) {
-        recordDailyCost(
-          db,
-          agent,
-          session.sessionKey,
-          today,
-          stats.totalInput,
-          stats.totalOutput,
-          stats.model,
-          cfg.probe.cost.customPrices
-        );
+    try {
+      const jsonlPath = findJsonlPath(cfg.sessionsDir, session);
+      if (jsonlPath) {
+        const stats = parseSessionStats(jsonlPath);
+        if (stats && stats.totalOutput > 0) {
+          recordDailyCost(
+            db,
+            agent,
+            session.sessionKey,
+            today,
+            stats.totalInput,
+            stats.totalOutput,
+            stats.model,
+            cfg.probe.cost.customPrices
+          );
+          console.log(`[daemon] cost recorded: ${session.sessionKey.slice(0, 30)} out=${stats.totalOutput} model=${stats.model}`);
+        } else {
+          console.log(`[daemon] cost skip: ${session.sessionKey.slice(0, 30)} — no output tokens in jsonl`);
+        }
+      } else {
+        console.log(`[daemon] cost skip: ${session.sessionKey.slice(0, 30)} — no jsonl found`);
       }
+    } catch (err) {
+      console.error(`[daemon] cost record error for ${session.sessionKey}:`, err);
     }
   }
 
