@@ -1,20 +1,11 @@
 {
   "name": "clawprobe",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The missing observability layer for OpenClaw agents",
-  "keywords": [
-    "openclaw",
-    "ai-agent",
-    "context",
-    "observability",
-    "llm"
-  ],
+  "keywords": ["openclaw", "ai-agent", "context", "observability", "llm"],
   "license": "MIT",
   "type": "module",
-  "files": [
-    "dist",
-    "README.md"
-  ],
+  "files": ["dist", "README.md"],
   "bin": {
     "clawprobe": "dist/index.js"
   },
