@@ -1,0 +1,33 @@
+{
+  "name": "clawprobe",
+  "version": "0.1.0",
+  "description": "The missing observability layer for OpenClaw agents",
+  "keywords": ["openclaw", "ai-agent", "context", "observability", "llm"],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "clawprobe": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "tsx --test test/**/*.test.ts",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0",
+    "chokidar": "^3.6.0",
+    "cli-table3": "^0.6.4",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.4"
+  }
+}
