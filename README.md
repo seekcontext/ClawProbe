@@ -1,48 +1,52 @@
-# clawprobe 🦞🔬
+# clawprobe
 
-**The missing observability layer for OpenClaw**
+**The Missing Observability Layer for OpenClaw**
 
 See what your agent thinks. Track what it forgets. Know what you spend.
 
-```bash
-npm install -g clawprobe
-clawprobe start
-```
+[![npm](https://img.shields.io/npm/v/clawprobe)](https://www.npmjs.com/package/clawprobe)
+[![npm downloads](https://img.shields.io/npm/dm/clawprobe)](https://www.npmjs.com/package/clawprobe)
+[![GitHub Stars](https://img.shields.io/github/stars/seekcontext/ClawProbe)](https://github.com/seekcontext/ClawProbe)
+[![License](https://img.shields.io/github/license/seekcontext/ClawProbe)](./LICENSE)
+
+[Why clawprobe](#why-clawprobe) •
+[Features](#features) •
+[Quick Start](#quick-start) •
+[How It Works](#how-it-works) •
+[CLI Reference](#cli-reference) •
+[Configuration](#configuration) •
+[Roadmap](#roadmap)
 
 ---
 
-## Why clawprobe?
+## Why clawprobe
 
-OpenClaw users regularly face three problems with no good solution:
+Your OpenClaw agent runs on token budgets, compacted memories, and injected context files — but none of that is visible to you while it's happening.
 
-**1. Context opacity** — How full is the context window right now? What's eating it? OpenClaw's built-in `/context detail` is useful but not always accessible mid-task.
+Three problems, no good solution:
 
-**2. Silent memory loss** — Compaction silently discards conversation context. Agreed-upon decisions, file paths, preferences — gone without notice.
+- **Context opacity** — How full is the context window right now? What's eating it? OpenClaw's built-in `/context detail` is useful but not always accessible mid-task.
+- **Silent memory loss** — Compaction silently discards conversation context. Agreed-upon decisions, file paths, preferences — gone without notice.
+- **Memory is a black box** — What does your agent actually remember? Editing `MEMORY.md` by hand is the only option.
 
-**3. Memory is a black box** — What does your agent actually remember? Editing `MEMORY.md` by hand is the only option.
+**clawprobe** gives you X-ray vision into your agent — without touching a single line of OpenClaw's internals:
 
-clawprobe addresses all three — without touching a single line of OpenClaw's internals.
+- **Real-time status** — See context utilization, active model, compaction count, and session info at a glance.
+- **Context breakdown** — Know exactly which workspace files consume how many tokens and whether any are being silently truncated.
+- **Compact tracking** — Every compaction event is captured. See what was discarded, and save important context to long-term memory before it's gone.
+- **Cost intelligence** — Track your API spend by day, week, or month with per-model pricing.
+- **Memory management** — Browse, search, add, and edit your agent's memory from the terminal.
+- **Proactive suggestions** — Automatic detection of common issues: truncated tools, excessive compaction, cost spikes, and more.
 
----
-
-## How it works
-
-clawprobe reads OpenClaw's existing data files — session transcripts, session store, workspace memory files — and turns them into actionable insights. No code changes, no plugins, no configuration required.
-
-```
-OpenClaw data files          clawprobe
-─────────────────────        ──────────────────────────────────
-sessions.json          →     Session list, token counts
-*.jsonl transcripts    →     Accurate context usage, compact events, cost
-workspace/*.md files   →     File size analysis, truncation detection
-MEMORY.md              →     Memory browser & editor
-```
+If your agent's context matters, you should be able to see it.
 
 ---
 
 ## Features
 
-### 📊 Agent Status
+### Agent Status
+
+See the health of your agent in one command.
 
 ```
 $ clawprobe status
@@ -58,9 +62,9 @@ $ clawprobe status
   Last active: Today 15:28
 ```
 
-### 🔍 Context Analysis
+### Context Analysis
 
-Understand how the context window is being used, and catch issues before they cause problems.
+Understand how the context window is being used, and catch truncation before it causes problems.
 
 ```
 $ clawprobe context
@@ -84,9 +88,9 @@ Session history estimate:
 Remaining headroom:  241.1K tokens (94%)
 ```
 
-### 📦 Compact Event Tracking
+### Compact Event Tracking
 
-Every time OpenClaw compacts your session, clawprobe captures what was compacted and lets you save key context to long-term memory.
+Every time OpenClaw compacts your session, clawprobe captures what was lost and lets you save key context to long-term memory.
 
 ```
 $ clawprobe compacts
@@ -105,7 +109,7 @@ $ clawprobe compacts
     → Save to memory: clawprobe memory save-compact 1
 ```
 
-### 💰 Cost Tracking
+### Cost Tracking
 
 See where your API budget goes, broken down by day.
 
@@ -124,29 +128,22 @@ $ clawprobe cost --week
   Output:  1.2K tokens   $0.00  (7%)
 ```
 
-> **Note:** Cost estimates are $0.00 for Kimi/Moonshot because the API
-> does not return pricing data in usage responses. Set `customPrices` in
-> `~/.clawprobe/config.json` to see accurate estimates.
+> **Note:** Cost estimates show $0.00 for Kimi/Moonshot because the API does not return pricing data. Set `customPrices` in `~/.clawprobe/config.json` for accurate estimates.
 
-### 🧠 Memory Browser
+### Memory Browser
 
 Browse, search, edit, and add to your agent's memory — no more hand-editing Markdown.
 
-```
-$ clawprobe memory list
-
-$ clawprobe memory search "database"
-
-$ clawprobe memory add "Prefer snake_case for all API responses"
-✓ Added to MEMORY.md
-
-$ clawprobe memory save-compact 1
-✓ Saved compact summary to MEMORY.md
+```bash
+clawprobe memory list                      # List memory entries
+clawprobe memory search "database"         # Search memory
+clawprobe memory add "Prefer snake_case"   # Add to memory
+clawprobe memory save-compact 1            # Save from compact event
 ```
 
-### 💡 Optimization Suggestions
+### Optimization Suggestions
 
-clawprobe automatically detects common issues.
+clawprobe continuously checks for common issues and tells you what to fix.
 
 ```
 $ clawprobe suggest
@@ -158,14 +155,19 @@ $ clawprobe suggest
 ```
 
 Rules checked:
-- `TOOLS.md` truncation (file exceeds bootstrap limit — tools silently cut off)
-- High compaction frequency (context fills up too fast)
-- High error rate (model returning errors repeatedly)
-- Stale workspace files (files unchanged for 30+ days)
+
+| Rule | What It Detects |
+|------|----------------|
+| TOOLS.md truncation | File exceeds bootstrap limit — tools silently cut off |
+| High compaction frequency | Context fills up too fast (< 30 min intervals) |
+| Context leak | Context tokens > 90% of model window |
+| Cost spike | Today's cost > 2x weekly average |
+| Memory bloat | MEMORY.md exceeds recommended size |
+| Stale workspace files | Files unchanged for 30+ days |
 
 ---
 
-## Installation
+## Quick Start
 
 ### Requirements
 
@@ -179,18 +181,57 @@ Rules checked:
 npm install -g clawprobe
 ```
 
-### First run
+### First Run
 
 ```bash
 clawprobe start      # Start background daemon
-clawprobe status     # Check active session
+clawprobe status     # See what your agent is doing right now
 ```
 
 clawprobe auto-detects your OpenClaw installation at `~/.openclaw`. No configuration needed.
 
 ---
 
-## Quick Reference
+## How It Works
+
+clawprobe reads OpenClaw's existing data files and turns them into actionable insights. No code patches, no plugins, no configuration required.
+
+```
+~/.openclaw/                                 clawprobe
+──────────────────────────────────           ────────────────────────────────
+sessions.json                          →     Session metadata, token counts
+*.jsonl transcripts                    →     Compact events, context usage, cost
+workspace/*.md (SOUL, AGENTS, TOOLS…)  →     File size analysis, truncation detection
+MEMORY.md + memory/*.md                →     Memory browser & editor
+openclaw.json                          →     Model, provider, config detection
+                                              │
+                                              ▼
+                                        ~/.clawprobe/probe.db (SQLite)
+                                              │
+                                              ▼
+                                        CLI commands + optimization engine
+```
+
+### Why It Just Works
+
+- **Zero configuration** — auto-detects OpenClaw's data directory and active agent
+- **Zero side effects** — read-only by default; only writes when you explicitly manage memory
+- **No code changes** — reads existing files, never patches OpenClaw internals
+- **Background daemon** — `clawprobe start` launches a watcher that tracks changes in real-time, batching updates with a 300ms debounce
+
+### What Gets Tracked
+
+| Data Source | What clawprobe Extracts |
+|-------------|------------------------|
+| `sessions.json` | Token counts, model, compaction count, session metadata |
+| `*.jsonl` transcripts | Individual messages, compaction events with summaries |
+| `workspace/*.md` | File sizes, token estimates, truncation status |
+| `MEMORY.md` | Memory entries for browsing, searching, and editing |
+| `openclaw.json` | Model config, workspace path, bootstrap limits |
+
+---
+
+## CLI Reference
 
 ```bash
 # Daemon
@@ -252,6 +293,47 @@ Optional config at `~/.clawprobe/config.json`:
 }
 ```
 
+Most users need zero configuration. clawprobe auto-detects everything from OpenClaw's existing files.
+
+---
+
+## Architecture
+
+```
+clawprobe/
+├── src/
+│   ├── index.ts              # CLI entry point
+│   ├── daemon.ts             # Background daemon (chokidar file watcher)
+│   ├── core/
+│   │   ├── config.ts         # OpenClaw config auto-detection
+│   │   ├── db.ts             # SQLite storage (probe.db)
+│   │   ├── watcher.ts        # File system monitoring
+│   │   ├── jsonl-parser.ts   # .jsonl transcript parser
+│   │   ├── session-store.ts  # sessions.json reader
+│   │   └── memory-editor.ts  # MEMORY.md read/write
+│   ├── engines/
+│   │   ├── cost.ts           # Token-to-USD cost calculation
+│   │   ├── compact-diff.ts   # Compaction analysis engine
+│   │   ├── file-analyzer.ts  # Workspace file size & truncation
+│   │   └── rule-engine.ts    # Optimization suggestion rules
+│   └── cli/
+│       ├── format.ts         # Terminal output formatting
+│       └── commands/         # status, cost, session, compacts, context, suggest, memory
+└── test/                     # Unit + integration tests
+```
+
+| Layer | Technology | Why |
+|-------|-----------|-----|
+| Runtime | Node.js ≥ 22 | Matches OpenClaw's requirement |
+| Language | TypeScript | Type-safe, matches OpenClaw ecosystem |
+| File watching | chokidar | Battle-tested, cross-platform |
+| Database | node:sqlite | Built-in, zero dependencies |
+| CLI | commander.js | Standard, well-documented |
+| Terminal UI | chalk + cli-table3 | Clean output, minimal deps |
+
+**Total production dependencies**: 4 packages.
+**No cloud services. No telemetry. No API keys.**
+
 ---
 
 ## Compatibility
@@ -263,15 +345,43 @@ clawprobe works by reading OpenClaw's file system directly. It is compatible wit
 ## Privacy
 
 - **100% local** — no data ever leaves your machine
-- **Read-only by default** — only writes when you use `memory add`, `memory edit`, `memory delete`, or `memory save-compact`
+- **Read-only by default** — only writes when you explicitly use `memory add`, `memory edit`, `memory delete`, or `memory save-compact`
 - **No telemetry** — clawprobe collects nothing
 - **No accounts** — no sign-up, no API keys required
 
 ---
 
+## Roadmap
+
+### v0.3 — Visual
+
+- [ ] **Web Dashboard** — Visual timeline, context gauge, cost charts, memory browser at `localhost:4747`
+- [ ] **Session timeline** — Turn-by-turn cost breakdown with compact event markers
+- [ ] **Side-by-side compact diff** — See exactly what was lost vs. what was summarized
+
+### v0.4 — OpenClaw Skill
+
+- [ ] **In-chat integration** — Ask your agent about its own context, cost, and memory via natural language
+- [ ] **Proactive alerts** — Agent warns you when context is near capacity or cost spikes
+- [ ] **Auto-save on compact** — Automatically preserve important context before compaction discards it
+
+### v0.5 — Smarter Analysis
+
+- [ ] **ContextEngine adapter** — Hook into the real `assemble()` pipeline for exact token breakdowns
+- [ ] **Retrieval visibility** — See what the memory engine searched and what it returned
+- [ ] **Cross-session analytics** — Compare context patterns and costs across sessions over time
+
+### Future
+
+- [ ] **Multi-agent support** — Monitor and compare multiple agents side by side
+- [ ] **Export & share** — Portable analysis bundles for debugging agent behavior with others
+- [ ] **Custom rules** — Define your own optimization rules and alert thresholds
+
+---
+
 ## Contributing
 
-clawprobe is open source (MIT). Contributions welcome.
+Contributions are welcome! clawprobe is open source (MIT).
 
 ```bash
 git clone https://github.com/seekcontext/ClawProbe
@@ -280,8 +390,14 @@ npm install
 npm run dev
 ```
 
+Run tests:
+
+```bash
+npm test
+```
+
 ---
 
 ## License
 
-MIT © 2026 clawprobe contributors
+[MIT](./LICENSE) — Use it however you want.
