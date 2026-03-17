@@ -214,6 +214,28 @@ async function processJsonlFile(
   // Fall back to UUID filename if no sessions.json entry (orphan transcript)
   const sessionKey = matchedSession?.sessionKey ?? path.basename(filePath, ".jsonl");
 
+  // For orphan sessions (no sessions.json entry), record cost from jsonl stats.
+  // Named sessions are handled in processSessionsJson with more accurate totals.
+  if (!matchedSession) {
+    try {
+      const stats = parseSessionStats(filePath);
+      if (stats && (stats.totalOutput > 0 || stats.totalInput > 0)) {
+        // Use the date the session was last active, not today
+        const lastActiveDate = stats.lastActiveAt > 0
+          ? new Date(stats.lastActiveAt * 1000).toISOString().slice(0, 10)
+          : todayString();
+        recordDailyCost(
+          db, agent, sessionKey, lastActiveDate,
+          stats.totalInput, stats.totalOutput,
+          stats.model, cfg.probe.cost.customPrices
+        );
+        console.log(`[daemon] cost recorded (orphan): ${sessionKey.slice(0, 30)} in=${stats.totalInput} out=${stats.totalOutput}`);
+      }
+    } catch (err) {
+      console.error(`[daemon] cost record error (orphan) for ${sessionKey}:`, err);
+    }
+  }
+
   const { entries, compactEvents } =
     fullScan ? parseAll(filePath) : parseIncremental(filePath);
 
