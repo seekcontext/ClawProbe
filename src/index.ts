@@ -1,7 +1,8 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
 import { spawn } from "child_process";
 import path from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, URL } from "url";
+import { readFileSync } from "fs";
 import { Command } from "commander";
 import { resolveConfig, assertOpenClawExists } from "./core/config.js";
 import { startDaemon } from "./daemon.js";
@@ -20,7 +21,10 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.2.7";
+// Read version from package.json at runtime so it's always in sync
+const VERSION: string = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf-8")
+).version as string;
 
 const program = new Command();
 
