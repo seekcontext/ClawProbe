@@ -1,7 +1,6 @@
 import path from "path";
 import fs from "fs";
 import { ResolvedConfig } from "../../core/config.js";
-import { openDb } from "../../core/db.js";
 import { getActiveSession, readSessionsStore, listJsonlFiles, sessionKeyFromPath, findJsonlPath } from "../../core/session-store.js";
 import { parseSessionStats } from "../../core/jsonl-parser.js";
 import {
@@ -203,9 +202,11 @@ export async function runSession(
 
   console.log();
   console.log(severity.bold("  Token usage:"));
-  // inputTokens here = last turn's totalTokens (current context size)
-  // outputTokens = cumulative output across all turns
-  console.log(`    Context now: ${fmtTokens(cost.inputTokens)} tokens`);
+  if (cost.contextTokens > 0) {
+    console.log(`    Context now:  ${fmtTokens(cost.contextTokens)} tokens  ${severity.muted("(current context window usage)")}`);
+  } else if (cost.inputTokens > 0) {
+    console.log(`    Context now:  ${fmtTokens(cost.inputTokens)} tokens  ${severity.muted("(last turn input)")}`);
+  }
   console.log(`    Output total: ${fmtTokens(cost.outputTokens)} tokens    ${fmtUsd(estimateCost({ input: 0, output: cost.outputTokens }, cost.model, customPrices))}`);
 
   const showTurns = opts.turns !== false && cost.turns.length > 0;

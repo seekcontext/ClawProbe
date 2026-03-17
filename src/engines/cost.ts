@@ -57,9 +57,13 @@ export interface SessionCost {
   sessionKey: string;
   model: string | null;
   provider: string | null;
+  /** Cumulative input tokens sent (from sessions.json or db snapshots) */
   inputTokens: number;
+  /** Cumulative output tokens received */
   outputTokens: number;
   totalTokens: number;
+  /** Current context window occupancy (from jsonl usage.input of the last turn) */
+  contextTokens: number;
   estimatedUsd: number;
   startedAt: number;
   lastActiveAt: number;
@@ -145,12 +149,12 @@ export function getSessionCost(
     inputTokens: totalInput,
     outputTokens: totalOutput,
     totalTokens: totalInput + totalOutput,
+    contextTokens: 0, // db snapshots don't store actual context occupancy separately
     estimatedUsd: estimateCost({ input: totalInput, output: totalOutput }, model, customPrices),
     startedAt: first.sampled_at,
     lastActiveAt: last.sampled_at,
     durationMin: Math.round((last.sampled_at - first.sampled_at) / 60),
     compactionCount: last.compaction_count,
-    // costAccurate means we have the real cumulative totals (always true when we have snapshots)
     costAccurate: true,
     turns,
   };
@@ -173,6 +177,7 @@ export function sessionCostFromEntry(
     inputTokens: entry.inputTokens,
     outputTokens: entry.outputTokens,
     totalTokens: entry.totalTokens,
+    contextTokens: entry.sessionTokens ?? 0, // actual context usage from sessions.json session_tokens
     estimatedUsd: usd,
     startedAt: entry.updatedAt,
     lastActiveAt: entry.updatedAt,
@@ -194,26 +199,30 @@ export function getSessionCostFromJsonl(
 ): SessionCost {
   const model = stats.model;
 
+  // Each turn's inputTokensDelta = that turn's usage.input (= cumulative context at that point).
+  // Each turn's outputTokensDelta = that turn's usage.output (incremental output).
   const turns: TurnCost[] = stats.turns.map((t) => ({
     turnIndex: t.turnIndex,
     timestamp: t.timestamp,
-    inputTokensDelta: t.usage.input,
-    outputTokensDelta: t.usage.output,
-    estimatedUsd: estimateCost({ input: t.usage.input, output: t.usage.output }, model, customPrices),
-    compactOccurred: false, // compaction analysis done separately
+    inputTokensDelta: t.usage.input,   // context size at this turn
+    outputTokensDelta: t.usage.output, // incremental output tokens
+    estimatedUsd: estimateCost({ input: t.usage.output, output: t.usage.output }, model, customPrices),
+    compactOccurred: false,
   }));
 
-  const totalUsd = turns.reduce((s, t) => s + t.estimatedUsd, 0);
+  // Cost is based on cumulative output (input is context, not newly sent content each turn)
+  const totalUsd = estimateCost({ input: 0, output: stats.totalOutput }, model, customPrices);
 
   return {
     sessionKey,
     model,
     provider: stats.provider,
-    // totalInput = last turn's input (= current context size in tokens)
-    // totalOutput = cumulative output across all turns
-    inputTokens: stats.totalInput,
-    outputTokens: stats.totalOutput,
+    // inputTokens/outputTokens kept as cumulative session totals for display in --list
+    inputTokens: stats.totalInput,   // last turn's context size (most recent context)
+    outputTokens: stats.totalOutput, // cumulative output across all turns
     totalTokens: stats.totalInput + stats.totalOutput,
+    // contextTokens = actual context window occupancy right now (from last turn's totalTokens)
+    contextTokens: stats.lastTotalTokens,
     estimatedUsd: totalUsd,
     startedAt: stats.startedAt,
     lastActiveAt: stats.lastActiveAt,
