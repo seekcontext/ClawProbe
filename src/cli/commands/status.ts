@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
-import { getActiveSession, readSessionsStore, listJsonlFiles, sessionKeyFromPath } from "../../core/session-store.js";
+import { getActiveSession, readSessionsStore, findJsonlPath } from "../../core/session-store.js";
 import { getLatestSnapshot } from "../../core/db.js";
 import { parseAll, parseSessionStats } from "../../core/jsonl-parser.js";
 import {
@@ -33,8 +33,9 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
 
   // Prefer jsonl transcript as the authoritative source for actual context token count.
   // Each assistant message reports `usage.totalTokens` = cumulative context at that turn.
-  const transcriptPath = path.join(cfg.sessionsDir, `${sessionEntry.sessionKey}.jsonl`);
-  const jsonlStats = fs.existsSync(transcriptPath) ? parseSessionStats(transcriptPath) : null;
+  // Note: transcript filenames use the session UUID, not the human-readable sessionKey.
+  const transcriptPath = findJsonlPath(cfg.sessionsDir, sessionEntry);
+  const jsonlStats = transcriptPath ? parseSessionStats(transcriptPath) : null;
 
   // sessionTokens = actual tokens in context right now
   // jsonlStats.lastTotalTokens is the most accurate (from last assistant message's usage.totalTokens)
@@ -46,7 +47,7 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
   let lastActiveAt = jsonlStats?.lastActiveAt ?? sessionEntry.updatedAt;
 
   // Final fallback: transcript mtime
-  if (lastActiveAt === 0 && fs.existsSync(transcriptPath)) {
+  if (lastActiveAt === 0 && transcriptPath) {
     try {
       lastActiveAt = Math.floor(fs.statSync(transcriptPath).mtimeMs / 1000);
     } catch { /* ignore */ }
@@ -106,7 +107,7 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
   if (
     sessionEntry.inputTokens === 0 &&
     sessionEntry.outputTokens === 0 &&
-    fs.existsSync(transcriptPath)
+    transcriptPath !== null
   ) {
     console.log();
     console.log(

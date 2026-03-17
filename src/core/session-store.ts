@@ -184,3 +184,48 @@ export function listJsonlFiles(sessionsDir: string): string[] {
 export function sessionKeyFromPath(filePath: string): string {
   return path.basename(filePath, ".jsonl");
 }
+
+/**
+ * Find the .jsonl transcript for a given session entry.
+ *
+ * OpenClaw names transcript files by the session UUID (e.g. 928a9cc3-...jsonl),
+ * while sessions.json keys sessions by a human-readable key like
+ * "agent:main:feishu:direct:ou_xxx". The sessionId field in sessions.json
+ * should match the UUID used as the filename.
+ *
+ * Strategy:
+ * 1. Try sessionsDir/{sessionId}.jsonl  (sessionId from sessions.json)
+ * 2. Try sessionsDir/{sessionKey}.jsonl (for UUID-style keys)
+ * 3. Scan all .jsonl files and read the first line to match session.id
+ */
+export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string | null {
+  // Strategy 1: sessionId is the UUID filename
+  if (entry.sessionId && entry.sessionId !== entry.sessionKey) {
+    const p = path.join(sessionsDir, `${entry.sessionId}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+
+  // Strategy 2: sessionKey itself might be a UUID filename
+  const p2 = path.join(sessionsDir, `${entry.sessionKey}.jsonl`);
+  if (fs.existsSync(p2)) return p2;
+
+  // Strategy 3: scan all .jsonl files, match by session header id field
+  for (const jsonlPath of listJsonlFiles(sessionsDir)) {
+    try {
+      const fd = fs.openSync(jsonlPath, "r");
+      const buf = Buffer.allocUnsafe(512);
+      const bytesRead = fs.readSync(fd, buf, 0, 512, 0);
+      fs.closeSync(fd);
+      const firstLine = buf.slice(0, bytesRead).toString("utf-8").split("\n")[0] ?? "";
+      const header = JSON.parse(firstLine) as Record<string, unknown>;
+      if (
+        header["type"] === "session" &&
+        (header["id"] === entry.sessionId || header["id"] === entry.sessionKey)
+      ) {
+        return jsonlPath;
+      }
+    } catch { /* skip */ }
+  }
+
+  return null;
+}

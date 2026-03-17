@@ -2,7 +2,7 @@ import path from "path";
 import fs from "fs";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
-import { getActiveSession, readSessionsStore, listJsonlFiles, sessionKeyFromPath } from "../../core/session-store.js";
+import { getActiveSession, readSessionsStore, listJsonlFiles, sessionKeyFromPath, findJsonlPath } from "../../core/session-store.js";
 import { parseSessionStats } from "../../core/jsonl-parser.js";
 import {
   getSessionCostFromJsonl, estimateCost, sessionCostFromEntry,
@@ -31,23 +31,26 @@ function loadSessionCost(
   sessionKey: string,
   customPrices: Record<string, { input: number; output: number }>
 ): SessionCost | null {
-  // Transcript path: sessions dir + sessionKey + .jsonl (for UUID-based keys)
-  // or derive from the key itself
-  const candidates = [
-    path.join(sessionsDir, `${sessionKey}.jsonl`),
-  ];
+  // First find the sessions.json entry so we can resolve the transcript path via UUID
+  const liveEntry = readSessionsStore(sessionsDir).find((e) => e.sessionKey === sessionKey);
 
-  for (const p of candidates) {
-    if (fs.existsSync(p)) {
-      const stats = parseSessionStats(p);
-      if (stats) {
-        return getSessionCostFromJsonl(stats, sessionKey, customPrices);
-      }
+  // Resolve transcript path: OpenClaw names files by session UUID, not the human-readable key
+  const jsonlPath = liveEntry
+    ? findJsonlPath(sessionsDir, liveEntry)
+    : (() => {
+        // No sessions.json entry — try treating sessionKey as UUID filename directly
+        const p = path.join(sessionsDir, `${sessionKey}.jsonl`);
+        return fs.existsSync(p) ? p : null;
+      })();
+
+  if (jsonlPath) {
+    const stats = parseSessionStats(jsonlPath);
+    if (stats) {
+      return getSessionCostFromJsonl(stats, sessionKey, customPrices);
     }
   }
 
-  // Fall back to sessions.json
-  const liveEntry = readSessionsStore(sessionsDir).find((e) => e.sessionKey === sessionKey);
+  // Fall back to sessions.json summary
   if (liveEntry) {
     return sessionCostFromEntry(liveEntry, customPrices);
   }
@@ -56,32 +59,38 @@ function loadSessionCost(
 }
 
 /**
- * Discover all session keys by scanning .jsonl files + sessions.json.
+ * Discover all sessions by reading sessions.json entries and resolving each
+ * to its .jsonl transcript (identified by session UUID filename).
  */
 function discoverAllSessions(
   sessionsDir: string,
   customPrices: Record<string, { input: number; output: number }>
 ): SessionCost[] {
   const costs: SessionCost[] = [];
-  const seenKeys = new Set<string>();
+  const seenJsonlPaths = new Set<string>();
 
-  // Primary: scan all .jsonl files
+  // Primary: sessions.json entries (human-readable keys), each resolved to its jsonl
+  for (const entry of readSessionsStore(sessionsDir)) {
+    const jsonlPath = findJsonlPath(sessionsDir, entry);
+    if (jsonlPath) {
+      seenJsonlPaths.add(jsonlPath);
+      const stats = parseSessionStats(jsonlPath);
+      if (stats) {
+        costs.push(getSessionCostFromJsonl(stats, entry.sessionKey, customPrices));
+        continue;
+      }
+    }
+    // No transcript found — use sessions.json summary
+    costs.push(sessionCostFromEntry(entry, customPrices));
+  }
+
+  // Supplement: any .jsonl files not covered by sessions.json (orphaned transcripts)
   for (const jsonlPath of listJsonlFiles(sessionsDir)) {
-    const key = sessionKeyFromPath(jsonlPath);
-    if (seenKeys.has(key)) continue;
-    seenKeys.add(key);
-
+    if (seenJsonlPaths.has(jsonlPath)) continue;
+    const key = sessionKeyFromPath(jsonlPath); // UUID as key
     const stats = parseSessionStats(jsonlPath);
     if (stats) {
       costs.push(getSessionCostFromJsonl(stats, key, customPrices));
-    }
-  }
-
-  // Supplement: add any sessions.json entries not found as .jsonl files
-  for (const entry of readSessionsStore(sessionsDir)) {
-    if (!seenKeys.has(entry.sessionKey)) {
-      seenKeys.add(entry.sessionKey);
-      costs.push(sessionCostFromEntry(entry, customPrices));
     }
   }
 
