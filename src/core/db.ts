@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS session_snapshots (
   sampled_at       INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_ss_agent_session ON session_snapshots(agent, session_key, sampled_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ss_agent_session ON session_snapshots(agent, session_key, sampled_at);
 
 CREATE TABLE IF NOT EXISTS cost_records (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS file_snapshots (
   sampled_at     INTEGER NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_fs_agent_path ON file_snapshots(agent, file_path, sampled_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fs_agent_path ON file_snapshots(agent, file_path, sampled_at);
 
 CREATE TABLE IF NOT EXISTS suggestions (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,6 +173,9 @@ export function insertSessionSnapshot(
   db: DatabaseSync,
   row: Omit<SessionSnapshotRow, "id">
 ): void {
+  // INSERT OR REPLACE deduplicates same (agent, session_key, sampled_at) so that
+  // if the daemon triggers twice in the same second we don't create duplicate rows
+  // that would cause token deltas to be counted twice in recordDailyCost.
   db.prepare(`
     INSERT INTO session_snapshots
       (agent, session_key, session_id, model, provider,
@@ -180,6 +183,15 @@ export function insertSessionSnapshot(
        compaction_count, sampled_at)
     VALUES
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(agent, session_key, sampled_at) DO UPDATE SET
+      session_id       = excluded.session_id,
+      model            = excluded.model,
+      provider         = excluded.provider,
+      input_tokens     = excluded.input_tokens,
+      output_tokens    = excluded.output_tokens,
+      total_tokens     = excluded.total_tokens,
+      context_tokens   = excluded.context_tokens,
+      compaction_count = excluded.compaction_count
   `).run(
     row.agent, row.session_key, row.session_id, row.model, row.provider,
     row.input_tokens, row.output_tokens, row.total_tokens, row.context_tokens,
@@ -328,10 +340,16 @@ export function insertFileSnapshot(
   db: DatabaseSync,
   row: Omit<FileSnapshotRow, "id">
 ): void {
+  // ON CONFLICT deduplicates same (agent, file_path, sampled_at) so repeated
+  // snapshots within the same second don't produce phantom rows in context output.
   db.prepare(`
     INSERT INTO file_snapshots
       (agent, file_path, raw_chars, injected_chars, was_truncated, sampled_at)
     VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(agent, file_path, sampled_at) DO UPDATE SET
+      raw_chars      = excluded.raw_chars,
+      injected_chars = excluded.injected_chars,
+      was_truncated  = excluded.was_truncated
   `).run(
     row.agent, row.file_path, row.raw_chars,
     row.injected_chars, row.was_truncated, row.sampled_at
@@ -342,6 +360,8 @@ export function getLatestFileSnapshots(
   db: DatabaseSync,
   agent: string
 ): FileSnapshotRow[] {
+  // UNIQUE index on (agent, file_path, sampled_at) guarantees at most one row per
+  // (file, second), so the simple MAX(sampled_at) join is always duplicate-free.
   return db.prepare(`
     SELECT fs.*
     FROM file_snapshots fs
