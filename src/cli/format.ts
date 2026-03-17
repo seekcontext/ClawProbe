@@ -171,18 +171,39 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
+// Resolve local timezone once at module load. Prefer TZ env var (set by user/OS),
+// then fall back to the system's IANA timezone via Intl.
+const LOCAL_TZ = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+const _dateFmt = new Intl.DateTimeFormat("en-US", {
+  timeZone: LOCAL_TZ,
+  month: "short",
+  day: "numeric",
+});
+const _timeFmt = new Intl.DateTimeFormat("en-US", {
+  timeZone: LOCAL_TZ,
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
 export function fmtDate(ts: number): string {
   const d = new Date(ts * 1000);
   const now = new Date();
-  const isToday = d.toDateString() === now.toDateString();
+
+  // Compare calendar dates in local timezone.
+  const dayOf = (dt: Date) =>
+    new Intl.DateTimeFormat("en-US", { timeZone: LOCAL_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(dt);
+
+  const isToday = dayOf(d) === dayOf(now);
   const yesterday = new Date(now);
   yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = d.toDateString() === yesterday.toDateString();
+  const isYesterday = dayOf(d) === dayOf(yesterday);
 
-  const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const timeStr = _timeFmt.format(d);
   if (isToday) return `Today ${timeStr}`;
   if (isYesterday) return `Yesterday ${timeStr}`;
-  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${timeStr}`;
+  return `${_dateFmt.format(d)} ${timeStr}`;
 }
 
 export function fmtDuration(minutes: number): string {
