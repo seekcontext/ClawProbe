@@ -89,7 +89,9 @@ function discoverAllSessions(
     const key = sessionKeyFromPath(jsonlPath); // UUID as key
     const stats = parseSessionStats(jsonlPath);
     if (stats) {
-      costs.push(getSessionCostFromJsonl(stats, key, customPrices));
+      const cost = getSessionCostFromJsonl(stats, key, customPrices);
+      cost.isOrphan = true;
+      costs.push(cost);
     }
   }
 
@@ -121,41 +123,64 @@ export async function runSession(
       return;
     }
 
+    const namedSessions = costs.filter(c => !c.isOrphan);
+    const orphanSessions = costs.filter(c => c.isOrphan);
+
     if (opts.full) {
-      for (const c of costs) {
+      for (const c of namedSessions) {
         const isActive = active?.sessionKey === c.sessionKey;
         const activeTag = isActive ? chalk.green(" ●") : "";
         console.log(`  ${chalk.bold(c.sessionKey)}${activeTag}`);
         console.log(
           `    Model: ${c.model ?? "—"}   ` +
-          `In: ${fmtTokens(c.inputTokens)}   Out: ${fmtTokens(c.outputTokens)}   ` +
+          `Ctx: ${fmtTokens(c.contextTokens || c.inputTokens)}   Out: ${fmtTokens(c.outputTokens)}   ` +
           `Compacts: ${c.compactionCount}   ` +
           `Last: ${c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—"}`
         );
         console.log();
       }
+      if (orphanSessions.length > 0) {
+        console.log(severity.muted(`  ── Archived (${orphanSessions.length} sessions without a sessions.json entry) ──`));
+        console.log();
+        for (const c of orphanSessions) {
+          console.log(`  ${severity.muted(c.sessionKey)}`);
+          console.log(
+            severity.muted(
+              `    Model: ${c.model ?? "—"}   ` +
+              `Ctx: ${fmtTokens(c.contextTokens || c.inputTokens)}   Out: ${fmtTokens(c.outputTokens)}   ` +
+              `Last: ${c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—"}`
+            )
+          );
+          console.log();
+        }
+      }
     } else {
       const table = makeTable(
-        ["Session Key", "Model", "Tokens (in/out)", "Cost", "Compacts", "Last Active"],
+        ["Session Key", "Model", "Ctx / Out tokens", "Cost", "Compacts", "Last Active"],
         [30, 22, 18, 10, 10, 16]
       );
-      for (const c of costs) {
+      for (const c of namedSessions) {
         const isActive = active?.sessionKey === c.sessionKey;
         const keyDisplay = c.sessionKey.length > 25
           ? `${c.sessionKey.slice(0, 24)}…${isActive ? " ●" : ""}`
           : `${c.sessionKey}${isActive ? " ●" : ""}`;
+        const ctxTokens = c.contextTokens || c.inputTokens;
         table.push([
           keyDisplay,
           c.model ?? "—",
-          `${fmtTokens(c.inputTokens)} / ${fmtTokens(c.outputTokens)}`,
+          `${fmtTokens(ctxTokens)} / ${fmtTokens(c.outputTokens)}`,
           c.estimatedUsd > 0 ? fmtUsd(c.estimatedUsd) : "—",
           String(c.compactionCount),
           c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—",
         ]);
       }
       console.log(table.toString());
-      if (costs.some(c => c.sessionKey.length > 25)) {
+      if (namedSessions.some(c => c.sessionKey.length > 25)) {
         console.log(severity.muted("  Tip: use --full to see complete session keys"));
+      }
+      if (orphanSessions.length > 0) {
+        console.log();
+        console.log(severity.muted(`  + ${orphanSessions.length} archived session(s) without sessions.json entry (use --full to view)`));
       }
     }
     console.log();

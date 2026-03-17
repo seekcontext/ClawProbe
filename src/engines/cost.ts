@@ -64,6 +64,8 @@ export interface SessionCost {
   totalTokens: number;
   /** Current context window occupancy (from jsonl usage.input of the last turn) */
   contextTokens: number;
+  /** True if this session has no sessions.json entry — identified only by its jsonl UUID */
+  isOrphan: boolean;
   estimatedUsd: number;
   startedAt: number;
   lastActiveAt: number;
@@ -149,7 +151,8 @@ export function getSessionCost(
     inputTokens: totalInput,
     outputTokens: totalOutput,
     totalTokens: totalInput + totalOutput,
-    contextTokens: 0, // db snapshots don't store actual context occupancy separately
+    contextTokens: 0,
+    isOrphan: false,
     estimatedUsd: estimateCost({ input: totalInput, output: totalOutput }, model, customPrices),
     startedAt: first.sampled_at,
     lastActiveAt: last.sampled_at,
@@ -177,7 +180,8 @@ export function sessionCostFromEntry(
     inputTokens: entry.inputTokens,
     outputTokens: entry.outputTokens,
     totalTokens: entry.totalTokens,
-    contextTokens: entry.sessionTokens ?? 0, // actual context usage from sessions.json session_tokens
+    contextTokens: entry.sessionTokens ?? 0,
+    isOrphan: false,
     estimatedUsd: usd,
     startedAt: entry.updatedAt,
     lastActiveAt: entry.updatedAt,
@@ -223,6 +227,7 @@ export function getSessionCostFromJsonl(
     totalTokens: stats.totalInput + stats.totalOutput,
     // contextTokens = actual context window occupancy right now (from last turn's totalTokens)
     contextTokens: stats.lastTotalTokens,
+    isOrphan: false,
     estimatedUsd: totalUsd,
     startedAt: stats.startedAt,
     lastActiveAt: stats.lastActiveAt,
