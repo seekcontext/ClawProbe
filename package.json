@@ -2,13 +2,24 @@
   "name": "clawprobe",
   "version": "0.1.0",
   "description": "The missing observability layer for OpenClaw agents",
-  "keywords": ["openclaw", "ai-agent", "context", "observability", "llm"],
+  "keywords": [
+    "openclaw",
+    "ai-agent",
+    "context",
+    "observability",
+    "llm"
+  ],
   "license": "MIT",
   "type": "module",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "bin": {
-    "clawprobe": "./dist/index.js"
+    "clawprobe": "dist/index.js"
   },
   "scripts": {
+    "prepublishOnly": "npm run build",
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
