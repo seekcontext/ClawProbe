@@ -15,189 +15,153 @@ clawprobe start
 
 OpenClaw users regularly face three problems with no good solution:
 
-**1. Runaway API costs** — Bills of $22/day to $3,600/month. The built-in `/context detail` command has a known 10x token undercount bug. You're flying blind.
+**1. Context opacity** — How full is the context window right now? What's eating it? OpenClaw's built-in `/context detail` is useful but not always accessible mid-task.
 
-**2. Silent memory loss** — Compaction silently discards conversation context mid-task. Agreed-upon decisions, file paths, preferences — gone. You don't even know what was lost.
+**2. Silent memory loss** — Compaction silently discards conversation context. Agreed-upon decisions, file paths, preferences — gone without notice.
 
 **3. Memory is a black box** — What does your agent actually remember? Editing `MEMORY.md` by hand is the only option.
 
-clawprobe fixes all three — without touching a single line of OpenClaw's internals.
+clawprobe addresses all three — without touching a single line of OpenClaw's internals.
 
 ---
 
 ## How it works
 
-clawprobe reads OpenClaw's existing data files — session transcripts, session store, workspace memory files — and turns them into actionable insights. No code changes, no ContextEngine plugins, no configuration required.
+clawprobe reads OpenClaw's existing data files — session transcripts, session store, workspace memory files — and turns them into actionable insights. No code changes, no plugins, no configuration required.
 
 ```
 OpenClaw data files          clawprobe
 ─────────────────────        ──────────────────────────────────
-sessions.json          →     Accurate token counts & cost tracking
-*.jsonl transcripts    →     Compact event detection & diff
-workspace/*.md files   →     File size analysis & truncation detection
+sessions.json          →     Session list, token counts
+*.jsonl transcripts    →     Accurate context usage, compact events, cost
+workspace/*.md files   →     File size analysis, truncation detection
 MEMORY.md              →     Memory browser & editor
-memory/*.sqlite        →     Semantic memory search
 ```
 
 ---
 
 ## Features
 
-### 💰 Cost Tracking
-
-See exactly where your API budget goes, broken down by day, week, and month.
+### 📊 Agent Status
 
 ```
-$ clawprobe cost --week
+$ clawprobe status
 
-💰 Weekly Cost (Mar 10 – Mar 17, 2026)
+📊  Agent Status  (active session)
+──────────────────────────────────────────────────
+  Agent:     main
+  Session:   agent:main:feishu:direct:ou_xxx ●
+  Model:     kimi-k2.5
+  Context:   14.9K / 256.0K tokens  █░░░░░░░░░  6%
+  This session: 4.6K in / 498 out
+  Compacts:  0
+  Last active: Today 15:28
+```
 
-  Total:    $18.42
-  Daily avg: $2.63
-  Month est: $78.90
+### 🔍 Context Analysis
 
-  Mon  ██████████  $3.21
-  Tue  ████████    $2.84
-  Wed  ████████████████  $4.12  ← peak
-  Thu  ██████      $2.10
-  Fri  █████████   $2.95
-  Sat  ████        $1.52
-  Sun  █████       $1.68
+Understand how the context window is being used, and catch issues before they cause problems.
 
-  Input tokens:   412,000 (78%)  $14.42
-  Output tokens:  115,000 (22%)   $4.00
+```
+$ clawprobe context
+
+🔍  Context Analysis  agent: main
+──────────────────────────────────────────────────
+Context used:  14.9K / 256.0K tokens  █░░░░░░░░░  6%
+
+Injected workspace files:
+  AGENTS.md    7,805 chars   ~2.0K tok   ✓ ok
+  SOUL.md      1,078 chars   ~270 tok    ✓ ok
+  TOOLS.md       851 chars   ~213 tok    ✓ ok
+
+Workspace subtotal:  ~2.8K tokens (7 files)
+
+Session history estimate:
+  Total in context:  14.9K tokens
+  Fixed overhead:    ~2.8K tokens (workspace files)
+  Conversation est:  ~12.2K tokens (messages + system prompt + tools)
+
+Remaining headroom:  241.1K tokens (94%)
 ```
 
 ### 📦 Compact Event Tracking
 
-Every time OpenClaw compacts your session, clawprobe captures exactly what was lost — and lets you save it to long-term memory in one command.
+Every time OpenClaw compacts your session, clawprobe captures what was compacted and lets you save key context to long-term memory.
 
 ```
 $ clawprobe compacts
 
-📦 Compact Events
+📦  Compact Events  last 5
+──────────────────────────────────────────────────
 
-  #3  Today 14:22
-      14 messages compacted (Turn 3 → Turn 16)
-      Tokens before: 38,450
+  #1  Today 14:22  [agent:main…]
 
-      ⚠ Potentially lost:
-        Turn 3  👤 "This project uses PostgreSQL, not MySQL"
-        Turn 12 👤 "API response format must use snake_case"
+    3 messages compacted
 
-      Summary: "User is building a TypeScript backend..."
-      → Missing: database choice, API format preference
+    Compacted messages:
+      👤  "Can you help me check if MEMORY.md is being tracked?"
+      🤖  "Yes, MEMORY.md has been added and is pending commit."
 
-      [run: clawprobe memory save-compact 3]
+    → Save to memory: clawprobe memory save-compact 1
 ```
+
+### 💰 Cost Tracking
+
+See where your API budget goes, broken down by day.
+
+```
+$ clawprobe cost --week
+
+💰  Weekly Cost  Mar 10 – Mar 17, 2026
+──────────────────────────────────────────────────
+  Total:     $0.00
+  Daily avg: $0.00
+  Month est: $0.00
+
+  2026-03-17  ██  $0.00
+
+  Input:   14.4K tokens  $0.00  (93%)
+  Output:  1.2K tokens   $0.00  (7%)
+```
+
+> **Note:** Cost estimates are $0.00 for Kimi/Moonshot because the API
+> does not return pricing data in usage responses. Set `customPrices` in
+> `~/.clawprobe/config.json` to see accurate estimates.
 
 ### 🧠 Memory Browser
 
 Browse, search, edit, and add to your agent's memory — no more hand-editing Markdown.
 
 ```
+$ clawprobe memory list
+
 $ clawprobe memory search "database"
 
-🔍 3 results
+$ clawprobe memory add "Prefer snake_case for all API responses"
+✓ Added to MEMORY.md
 
-  1. MEMORY.md:8  (score: 0.92)
-     "Database: PostgreSQL. Not MySQL. Team prefers PG advanced features."
-
-  2. memory/2026-03-10.md:15  (score: 0.85)
-     "Decided on Prisma ORM for migrations. Scripts in src/migrations/."
-
-  3. memory/2026-03-08.md:3  (score: 0.71)
-     "Redis for caching layer. Config in .env."
-```
-
-```
-$ clawprobe memory add "New requirement: API pagination, default 20 items per page"
-✅ Added to MEMORY.md
-```
-
-### 🔍 Context Analysis
-
-Understand how your agent's context window is being used, and catch issues before they cost you.
-
-```
-$ clawprobe context
-
-🔍 Context Analysis
-
-  Workspace files:
-    SOUL.md       912 chars    ~228 tok   ✓ fully injected
-    AGENTS.md   1,742 chars    ~436 tok   ✓ fully injected
-    TOOLS.md   54,210 chars  ~13,553 tok  ⚠ TRUNCATED → 20,000 chars (~5,000 tok)
-    USER.md       388 chars     ~97 tok   ✓ fully injected
-    MEMORY.md     912 chars    ~228 tok   ✓ fully injected
-
-  Context tokens (from session):  31,204 / 128,000 (24%)
-  Workspace files estimate:        ~7,100 tok (23%)
-
-  ⚠ TOOLS.md: 34,210 chars (63%) are never seen by the model
-    → Consider splitting into per-task files or using Skills
+$ clawprobe memory save-compact 1
+✓ Saved compact summary to MEMORY.md
 ```
 
 ### 💡 Optimization Suggestions
 
-clawprobe automatically detects common cost and reliability issues.
+clawprobe automatically detects common issues.
 
 ```
 $ clawprobe suggest
 
-💡 Suggestions
+💡  Optimization Suggestions  agent: main
+──────────────────────────────────────────────────
 
-  [CRITICAL] TOOLS.md truncated for 7 consecutive days
-    34K chars of tool descriptions never reach the model.
-    Estimated waste: ~$2.10/week
-    → Split TOOLS.md into smaller Skill-specific files
-
-  [WARNING] Compaction frequency is high (avg 32 min interval)
-    reserveTokens=16384 may be too low for your workflow.
-    → Try: increase to 24000 in openclaw.json
-
-  [INFO] 3 workspace files haven't changed in 30+ days
-    IDENTITY.md, HEARTBEAT.md may be safe to trim
+  ✓ No issues detected. Your agent looks healthy.
 ```
 
-### 📊 Web Dashboard
-
-A local web UI for deeper visual analysis.
-
-```
-$ clawprobe start
-Dashboard: http://localhost:4747
-```
-
-Pages: Overview · Cost Trends · Compact Timeline · Context · Memory · Sessions
-
-Access remotely via SSH tunnel:
-```bash
-ssh -L 4747:localhost:4747 user@your-server
-```
-
-### 💬 IM Integration (OpenClaw Skill)
-
-Install the clawprobe Skill to interact via Telegram, WhatsApp, or any chat app connected to OpenClaw.
-
-```bash
-openclaw plugins install @clawprobe/skill
-```
-
-Then in chat:
-```
-You: probe cost
-Agent: 💰 This week: $18.42 (avg $2.63/day, est $78.90/month)
-
-You: probe compacts
-Agent: 📦 Last compact: 14:22 today. 14 messages compacted.
-       ⚠ Lost: PostgreSQL preference, snake_case API format
-       → Reply "probe save 3" to save to long-term memory
-
-You: probe suggest
-Agent: 💡 TOOLS.md truncated (CRITICAL) — wasting ~$2.10/week
-       reserveTokens may be too low (WARNING)
-```
+Rules checked:
+- `TOOLS.md` truncation (file exceeds bootstrap limit — tools silently cut off)
+- High compaction frequency (context fills up too fast)
+- High error rate (model returning errors repeatedly)
+- Stale workspace files (files unchanged for 30+ days)
 
 ---
 
@@ -218,7 +182,8 @@ npm install -g clawprobe
 ### First run
 
 ```bash
-clawprobe start
+clawprobe start      # Start background daemon
+clawprobe status     # Check active session
 ```
 
 clawprobe auto-detects your OpenClaw installation at `~/.openclaw`. No configuration needed.
@@ -228,9 +193,18 @@ clawprobe auto-detects your OpenClaw installation at `~/.openclaw`. No configura
 ## Quick Reference
 
 ```bash
-# Status
-clawprobe status              # Current session info
+# Daemon
+clawprobe start               # Start background daemon
+clawprobe stop                # Stop daemon
+
+# Status & context
+clawprobe status              # Current session (tokens, model, compactions)
 clawprobe context             # Context window breakdown
+
+# Sessions
+clawprobe session             # Active session details + turn timeline
+clawprobe session --list      # All sessions
+clawprobe session --list --full  # Full session keys (not truncated)
 
 # Cost
 clawprobe cost                # This week
@@ -238,44 +212,58 @@ clawprobe cost --day          # Today
 clawprobe cost --month        # This month
 
 # Compact events
-clawprobe compacts            # Last 5 events
-clawprobe compacts --last 10  # Last 10 events
+clawprobe compacts            # Last 5 compact events
+clawprobe compacts --last 10  # Last 10
 
 # Memory
-clawprobe memory list                        # List all long-term memory
-clawprobe memory search "postgres"           # Search memory
-clawprobe memory add "prefer snake_case"     # Add to memory
-clawprobe memory save-compact 3              # Save from compact event #3
+clawprobe memory list                      # List memory entries
+clawprobe memory search "postgres"         # Search memory
+clawprobe memory add "prefer snake_case"   # Add to memory
+clawprobe memory save-compact <id>         # Save from compact event
 
 # Suggestions
-clawprobe suggest             # Show all suggestions
+clawprobe suggest             # Show optimization suggestions
 
-# Dashboard
-clawprobe start               # Start daemon + web UI at :4747
-clawprobe stop                # Stop daemon
+# Diagnostics
+clawprobe config --diag       # Full diagnostic dump
+```
+
+---
+
+## Configuration
+
+Optional config at `~/.clawprobe/config.json`:
+
+```json
+{
+  "timezone": "Asia/Shanghai",
+  "openclaw": {
+    "dir": "~/.openclaw",
+    "agent": "main"
+  },
+  "cost": {
+    "customPrices": {
+      "kimi-k2.5": { "input": 0.004, "output": 0.016 }
+    }
+  },
+  "alerts": {
+    "dailyBudgetUsd": 5.00
+  }
+}
 ```
 
 ---
 
 ## Compatibility
 
-| ContextEngine Plugin | Compatible |
-|----------------------|-----------|
-| LegacyContextEngine (default) | ✅ |
-| lossless-claw | ✅ |
-| OpenViking Plugin | ✅ |
-| MemOS Cloud Plugin | ✅ |
-| ClawVault | ✅ |
-| Any other plugin | ✅ |
-
-clawprobe works by reading OpenClaw's file system, not by hooking into the ContextEngine. It is compatible with any plugin configuration.
+clawprobe works by reading OpenClaw's file system directly. It is compatible with any OpenClaw version that writes `sessions.json` and `.jsonl` transcript files to `~/.openclaw/agents/<agent>/sessions/`.
 
 ---
 
 ## Privacy
 
 - **100% local** — no data ever leaves your machine
-- **Read-only by default** — only writes when you explicitly use `memory add`, `memory edit`, `memory delete`, or `memory save-compact`
+- **Read-only by default** — only writes when you use `memory add`, `memory edit`, `memory delete`, or `memory save-compact`
 - **No telemetry** — clawprobe collects nothing
 - **No accounts** — no sign-up, no API keys required
 
@@ -286,13 +274,11 @@ clawprobe works by reading OpenClaw's file system, not by hooking into the Conte
 clawprobe is open source (MIT). Contributions welcome.
 
 ```bash
-git clone https://github.com/your-username/clawprobe
-cd clawprobe
+git clone https://github.com/seekcontext/ClawProbe
+cd ClawProbe
 npm install
 npm run dev
 ```
-
-See [DESIGN.md](./DESIGN.md) for architecture details.
 
 ---
 

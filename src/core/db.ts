@@ -96,7 +96,8 @@ CREATE TABLE IF NOT EXISTS cost_records (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   model         TEXT,
   estimated_usd REAL    NOT NULL DEFAULT 0,
-  recorded_at   INTEGER NOT NULL
+  recorded_at   INTEGER NOT NULL,
+  UNIQUE(agent, session_key, date)
 );
 
 CREATE INDEX IF NOT EXISTS idx_cr_agent_date ON cost_records(agent, date);
@@ -256,10 +257,19 @@ export function upsertCostRecord(
   db: DatabaseSync,
   row: Omit<CostRecordRow, "id">
 ): void {
+  // Use ON CONFLICT to accumulate deltas per (agent, session_key, date)
+  // so repeated scans don't double-count. We track the cumulative total
+  // per day by storing the max seen value and updating when it grows.
   db.prepare(`
     INSERT INTO cost_records
       (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(agent, session_key, date) DO UPDATE SET
+      input_tokens  = MAX(input_tokens,  excluded.input_tokens),
+      output_tokens = MAX(output_tokens, excluded.output_tokens),
+      model         = COALESCE(excluded.model, model),
+      estimated_usd = MAX(estimated_usd, excluded.estimated_usd),
+      recorded_at   = excluded.recorded_at
   `).run(
     row.agent, row.session_key, row.date,
     row.input_tokens, row.output_tokens, row.model,

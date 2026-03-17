@@ -1,15 +1,14 @@
 import fs from "fs";
 import path from "path";
 import { ResolvedConfig } from "./core/config.js";
-import { openDb, insertSessionSnapshot } from "./core/db.js";
+import { openDb, insertSessionSnapshot, upsertCompactEvent } from "./core/db.js";
 import { FileWatcher, buildWatchGlobs, FileChange } from "./core/watcher.js";
-import { readSessionsStore, listJsonlFiles, sessionKeyFromPath } from "./core/session-store.js";
-import { parseIncremental, parseAll } from "./core/jsonl-parser.js";
+import { readSessionsStore, listJsonlFiles, findJsonlPath } from "./core/session-store.js";
+import { parseIncremental, parseAll, parseSessionStats } from "./core/jsonl-parser.js";
 import { analyzeCompaction } from "./engines/compact-diff.js";
 import { snapshotWorkspaceFiles } from "./engines/file-analyzer.js";
 import { runRules, persistSuggestions, ProbeState } from "./engines/rule-engine.js";
-import { recordDailyCost, todayString } from "./engines/cost.js";
-import { upsertCompactEvent } from "./core/db.js";
+import { recordDailyCost, estimateCost, todayString } from "./engines/cost.js";
 
 let watcher: FileWatcher | null = null;
 
@@ -35,6 +34,10 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
   if (process.env.CLAWPROBE_DAEMON === "1") {
     redirectStdioToLogFile(cfg.probeDir);
   }
+
+  // Write PID file so `clawprobe stop` can kill us
+  const pidFile = path.join(cfg.probeDir, "daemon.pid");
+  fs.writeFileSync(pidFile, String(process.pid), "utf-8");
 
   const db = openDb(cfg.probeDir);
   const agent = cfg.probe.openclaw.agent;
@@ -123,6 +126,7 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
   const shutdown = async () => {
     clearInterval(ruleTimer);
     if (watcher) await watcher.close();
+    try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
     process.exit(0);
   };
 
@@ -154,23 +158,19 @@ async function processSessionsJson(
       sampled_at: now,
     });
 
-    // Record incremental cost
-    const { getAllSnapshots } = await import("./core/db.js");
-    const snaps = getAllSnapshots(db, agent, session.sessionKey);
-    if (snaps.length >= 2) {
-      const prev = snaps[snaps.length - 2]!;
-      const curr = snaps[snaps.length - 1]!;
-      const inDelta = Math.max(0, curr.input_tokens - prev.input_tokens);
-      const outDelta = Math.max(0, curr.output_tokens - prev.output_tokens);
-      if (inDelta > 0 || outDelta > 0) {
+    // Record daily cost from jsonl transcript (most accurate source)
+    const jsonlPath = findJsonlPath(cfg.sessionsDir, session);
+    if (jsonlPath) {
+      const stats = parseSessionStats(jsonlPath);
+      if (stats && stats.totalOutput > 0) {
         recordDailyCost(
           db,
           agent,
           session.sessionKey,
           today,
-          inDelta,
-          outDelta,
-          curr.model,
+          stats.totalInput,
+          stats.totalOutput,
+          stats.model,
           cfg.probe.cost.customPrices
         );
       }
@@ -187,20 +187,28 @@ async function processJsonlFile(
   fullScan: boolean
 ): Promise<void> {
   const db = openDb(cfg.probeDir);
-  const sessionKey = sessionKeyFromPath(filePath);
+
+  // Resolve human-readable sessionKey: jsonl files are named by UUID,
+  // but we need to store the key that matches sessions.json for queries to work.
+  const sessions = readSessionsStore(cfg.sessionsDir);
+  const matchedSession = sessions.find((s) => {
+    const p = findJsonlPath(cfg.sessionsDir, s);
+    return p === filePath || (p && path.resolve(p) === path.resolve(filePath));
+  });
+  // Fall back to UUID filename if no sessions.json entry (orphan transcript)
+  const sessionKey = matchedSession?.sessionKey ?? path.basename(filePath, ".jsonl");
 
   const { entries, compactEvents } =
     fullScan ? parseAll(filePath) : parseIncremental(filePath);
 
   if (compactEvents.length === 0) return;
 
+  const { getCompactedMessages } = await import("./core/jsonl-parser.js");
   let prevFirstKeptId: string | undefined;
 
   for (const event of compactEvents) {
-    const compactedMessages = (await import("./core/jsonl-parser.js"))
-      .getCompactedMessages(entries, event, prevFirstKeptId);
-
-    const analysis = analyzeCompaction(event, entries, prevFirstKeptId);
+    const compactedMessages = getCompactedMessages(entries, event, prevFirstKeptId);
+    analyzeCompaction(event, entries, prevFirstKeptId);
 
     upsertCompactEvent(db, {
       agent,

@@ -2,7 +2,7 @@
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath, URL } from "url";
-import { readFileSync } from "fs";
+import fs, { readFileSync } from "fs";
 import { Command } from "commander";
 import { resolveConfig, assertOpenClawExists } from "./core/config.js";
 import { startDaemon } from "./daemon.js";
@@ -77,7 +77,31 @@ program
   .command("stop")
   .description("Stop the running daemon")
   .action(() => {
-    console.log("Use your process manager or Ctrl+C to stop the daemon.");
+    const cfg = resolveConfig();
+    const pidFile = `${cfg.probeDir}/daemon.pid`;
+    const { existsSync, readFileSync, unlinkSync } = fs;
+    if (!existsSync(pidFile)) {
+      console.log("No daemon PID file found — daemon may not be running.");
+      return;
+    }
+    const pid = parseInt(readFileSync(pidFile, "utf-8").trim(), 10);
+    if (isNaN(pid)) {
+      console.log("Invalid PID file. Delete it manually: " + pidFile);
+      return;
+    }
+    try {
+      process.kill(pid, "SIGTERM");
+      unlinkSync(pidFile);
+      console.log(`✓ Daemon stopped (PID ${pid})`);
+    } catch (e: unknown) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === "ESRCH") {
+        console.log(`Daemon (PID ${pid}) was not running. Cleaning up PID file.`);
+        try { unlinkSync(pidFile); } catch { /* ignore */ }
+      } else {
+        console.error(`Failed to stop daemon: ${err.message}`);
+      }
+    }
   });
 
 // --- status ---
