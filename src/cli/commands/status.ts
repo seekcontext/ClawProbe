@@ -31,13 +31,17 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
 
   const snapshot = getLatestSnapshot(db, agent, sessionEntry.sessionKey);
 
-  // Prefer live sessions.json (and snapshot only for model/context when present)
-  let contextTokens = snapshot?.context_tokens ?? sessionEntry.contextTokens;
+  // sessionTokens = actual tokens currently in the model's context window
+  // (matches "Session tokens (cached): N total" in /context detail)
+  // windowSize = context window upper limit (ctx=256000)
+  // sessions.json's contextTokens field stores the window upper limit, NOT actual usage.
+  const sessionTokens = sessionEntry.sessionTokens;   // actual usage; 0 if not reported
+  const windowSize = sessionEntry.windowSize || sessionEntry.contextTokens; // upper limit
+
   let compactionCount = sessionEntry.compactionCount;
   let lastActiveAt = sessionEntry.updatedAt;
 
-  // When sessions.json has no token/compact data yet, derive from transcript so
-  // "clawprobe status" shows existing state without requiring daemon to have run first.
+  // When sessions.json has no token/compact data yet, derive from transcript.
   const transcriptPath = path.join(cfg.sessionsDir, `${sessionEntry.sessionKey}.jsonl`);
   if (fs.existsSync(transcriptPath)) {
     if (compactionCount === 0) {
@@ -58,8 +62,9 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
   }
 
   const model = snapshot?.model ?? sessionEntry.modelOverride ?? null;
-  const windowSize = getWindowSize(model, contextTokens);
-  const utilization = contextTokens / windowSize;
+  const resolvedWindowSize = getWindowSize(model, windowSize || sessionTokens);
+  const displayContextTokens = sessionTokens > 0 ? sessionTokens : 0;
+  const utilization = resolvedWindowSize > 0 ? displayContextTokens / resolvedWindowSize : 0;
   const isActive = !opts.session;
 
   if (opts.json) {
@@ -69,8 +74,8 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
       sessionId: sessionEntry.sessionId,
       model,
       provider: snapshot?.provider ?? sessionEntry.providerOverride ?? null,
-      contextTokens,
-      windowSize,
+      sessionTokens: displayContextTokens,
+      windowSize: resolvedWindowSize,
       utilizationPct: Math.round(utilization * 100),
       inputTokens: sessionEntry.inputTokens,
       outputTokens: sessionEntry.outputTokens,
@@ -88,10 +93,17 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
   if (model) console.log(`  Model:     ${model}`);
 
   console.log();
-  console.log(
-    `  Context:   ${fmtTokens(contextTokens)} / ${fmtTokens(windowSize)} tokens  ` +
-    `${tokenBar(contextTokens, windowSize)}  ${Math.round(utilization * 100)}%`
-  );
+  if (displayContextTokens > 0) {
+    console.log(
+      `  Context:   ${fmtTokens(displayContextTokens)} / ${fmtTokens(resolvedWindowSize)} tokens  ` +
+      `${tokenBar(displayContextTokens, resolvedWindowSize)}  ${Math.round(utilization * 100)}%`
+    );
+  } else {
+    console.log(
+      `  Context window: ${fmtTokens(resolvedWindowSize)} tokens  ` +
+      severity.muted("(actual usage not in sessions.json — run: clawprobe context)")
+    );
+  }
   console.log(
     `  This session: ${fmtTokens(sessionEntry.inputTokens)} in / ${fmtTokens(sessionEntry.outputTokens)} out`
   );
@@ -103,12 +115,11 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
   if (
     sessionEntry.inputTokens === 0 &&
     sessionEntry.outputTokens === 0 &&
-    sessionEntry.contextTokens === 0 &&
     fs.existsSync(transcriptPath)
   ) {
     console.log();
     console.log(
-      severity.muted("  Token counts come from sessions.json. If OpenClaw hasn’t written them yet, run a turn or check your OpenClaw version.")
+      severity.muted("  Token counts come from sessions.json. If OpenClaw hasn't written them yet, run a turn or check your OpenClaw version.")
     );
   }
 

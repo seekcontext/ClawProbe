@@ -8,6 +8,14 @@ export interface SessionEntry {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /** Actual tokens currently in context window (session_tokens / total in /context detail) */
+  sessionTokens: number;
+  /** Context window size upper limit (ctx= field, i.e. model max context) */
+  windowSize: number;
+  /**
+   * @deprecated Use sessionTokens for actual usage, windowSize for the limit.
+   * Kept for backward compatibility — may equal windowSize (not actual usage).
+   */
   contextTokens: number;
   compactionCount: number;
   memoryFlushAt?: number;
@@ -27,6 +35,12 @@ interface RawSessionEntry {
   outputTokens?: number;
   totalTokens?: number;
   contextTokens?: number;
+  // session_tokens = actual tokens currently in context (from /context detail "Session tokens (cached)")
+  sessionTokens?: number;
+  session_tokens?: number;
+  // ctx_size = context window upper limit
+  ctxSize?: number;
+  ctx_size?: number;
   compactionCount?: number;
   memoryFlushAt?: number;
   modelOverride?: string;
@@ -87,7 +101,18 @@ function normalizeEntry(
   const inputTokens = getFirstNum(sources, "inputTokens", "input_tokens");
   const outputTokens = getFirstNum(sources, "outputTokens", "output_tokens");
   const totalTokens = getFirstNum(sources, "totalTokens", "total_tokens") || inputTokens + outputTokens;
+
+  // contextTokens in sessions.json is actually the window size upper limit (ctx=256000),
+  // NOT the actual current usage. The actual usage is in session_tokens field.
   const contextTokens = getFirstNum(sources, "contextTokens", "context_tokens");
+
+  // sessionTokens = actual tokens in context right now (matches "Session tokens (cached)" in /context detail)
+  // Try several field names OpenClaw may use
+  const sessionTokens = getFirstNum(sources, "sessionTokens", "session_tokens");
+
+  // windowSize = context window upper limit (ctx= value)
+  const windowSize = getFirstNum(sources, "ctxSize", "ctx_size") || contextTokens;
+
   const compactionCount = getFirstNum(sources, "compactionCount", "compaction_count");
   let updatedAt = getFirstNum(sources, "updatedAt", "updated_at");
   if (updatedAt === 0) {
@@ -105,6 +130,8 @@ function normalizeEntry(
     inputTokens,
     outputTokens,
     totalTokens,
+    sessionTokens,
+    windowSize,
     contextTokens,
     compactionCount,
     memoryFlushAt: (raw.memoryFlushAt ?? raw.memory_flush_at) as number | undefined,
