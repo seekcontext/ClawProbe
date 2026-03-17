@@ -96,11 +96,11 @@ CREATE TABLE IF NOT EXISTS cost_records (
   output_tokens INTEGER NOT NULL DEFAULT 0,
   model         TEXT,
   estimated_usd REAL    NOT NULL DEFAULT 0,
-  recorded_at   INTEGER NOT NULL,
-  UNIQUE(agent, session_key, date)
+  recorded_at   INTEGER NOT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_cr_agent_date ON cost_records(agent, date);
+
 
 CREATE TABLE IF NOT EXISTS compact_events (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +153,33 @@ export function openDb(probeDir: string): DatabaseSync {
   const dbPath = path.join(probeDir, "probe.db");
   _db = new DatabaseSync(dbPath);
   _db.exec(SCHEMA);
+  migrateDb(_db);
   return _db;
+}
+
+/**
+ * Run lightweight migrations for schema changes that can't be done with
+ * CREATE TABLE IF NOT EXISTS (e.g. deduplicating existing rows before
+ * adding a UNIQUE index, or adding columns to existing tables).
+ */
+function migrateDb(db: DatabaseSync): void {
+  // v0.2.11: deduplicate cost_records before adding unique index
+  try {
+    // Remove duplicate rows, keeping only the one with the highest output_tokens per (agent, session_key, date)
+    db.exec(`
+      DELETE FROM cost_records
+      WHERE id NOT IN (
+        SELECT MAX(id) FROM cost_records
+        GROUP BY agent, session_key, date
+      )
+    `);
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_unique
+      ON cost_records(agent, session_key, date)
+    `);
+  } catch {
+    // If migration fails, the SELECT+UPDATE fallback in upsertCostRecord still works
+  }
 }
 
 export function getDb(): DatabaseSync {
@@ -257,24 +283,42 @@ export function upsertCostRecord(
   db: DatabaseSync,
   row: Omit<CostRecordRow, "id">
 ): void {
-  // Use ON CONFLICT to accumulate deltas per (agent, session_key, date)
-  // so repeated scans don't double-count. We track the cumulative total
-  // per day by storing the max seen value and updating when it grows.
-  db.prepare(`
-    INSERT INTO cost_records
-      (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(agent, session_key, date) DO UPDATE SET
-      input_tokens  = MAX(input_tokens,  excluded.input_tokens),
-      output_tokens = MAX(output_tokens, excluded.output_tokens),
-      model         = COALESCE(excluded.model, model),
-      estimated_usd = MAX(estimated_usd, excluded.estimated_usd),
-      recorded_at   = excluded.recorded_at
-  `).run(
-    row.agent, row.session_key, row.date,
-    row.input_tokens, row.output_tokens, row.model,
-    row.estimated_usd, row.recorded_at
-  );
+  // Use SELECT + UPDATE/INSERT to avoid relying on UNIQUE constraint
+  // (which may not exist on older DBs created before v0.2.11).
+  // We store the cumulative daily total per session, updating when the
+  // new value is larger (so repeated scans don't double-count).
+  const existing = db.prepare(`
+    SELECT id, input_tokens, output_tokens, estimated_usd
+    FROM cost_records
+    WHERE agent = ? AND session_key = ? AND date = ?
+    ORDER BY id DESC LIMIT 1
+  `).get(row.agent, row.session_key, row.date) as
+    { id: number; input_tokens: number; output_tokens: number; estimated_usd: number } | undefined;
+
+  if (existing) {
+    // Only update if the new value is larger (cumulative total grew)
+    if (row.output_tokens > existing.output_tokens) {
+      db.prepare(`
+        UPDATE cost_records
+        SET input_tokens = ?, output_tokens = ?, model = ?, estimated_usd = ?, recorded_at = ?
+        WHERE id = ?
+      `).run(
+        row.input_tokens, row.output_tokens,
+        row.model, row.estimated_usd, row.recorded_at,
+        existing.id
+      );
+    }
+  } else {
+    db.prepare(`
+      INSERT INTO cost_records
+        (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      row.agent, row.session_key, row.date,
+      row.input_tokens, row.output_tokens, row.model,
+      row.estimated_usd, row.recorded_at
+    );
+  }
 }
 
 export function getDailyCostSummary(
