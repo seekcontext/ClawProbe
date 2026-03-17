@@ -1,30 +1,19 @@
+import fs from "fs";
+import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
 import { getActiveSession, readSessionsStore } from "../../core/session-store.js";
 import { getLatestSnapshot } from "../../core/db.js";
+import { parseAll } from "../../core/jsonl-parser.js";
 import {
   header, fmtTokens, fmtDate, fmtUsd, tokenBar, outputJson, printError, severity,
+  getWindowSize,
 } from "../format.js";
 
 interface StatusOptions {
   agent?: string;
   session?: string;
   json?: boolean;
-}
-
-const MODEL_WINDOWS: Record<string, number> = {
-  "claude-opus-4": 200000,
-  "claude-sonnet-4.5": 200000,
-  "gpt-5.4": 128000,
-  "gpt-5.4-mini": 128000,
-  "gemini-3.1-flash": 1000000,
-  "deepseek-v3": 128000,
-};
-
-function getWindowSize(model: string | null): number {
-  if (!model) return 128000;
-  const key = Object.keys(MODEL_WINDOWS).find((k) => model.includes(k));
-  return key ? MODEL_WINDOWS[key]! : 128000;
 }
 
 export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promise<void> {
@@ -42,9 +31,34 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
 
   const snapshot = getLatestSnapshot(db, agent, sessionEntry.sessionKey);
 
-  const contextTokens = snapshot?.context_tokens ?? sessionEntry.contextTokens;
+  // Prefer live sessions.json (and snapshot only for model/context when present)
+  let contextTokens = snapshot?.context_tokens ?? sessionEntry.contextTokens;
+  let compactionCount = sessionEntry.compactionCount;
+  let lastActiveAt = sessionEntry.updatedAt;
+
+  // When sessions.json has no token/compact data yet, derive from transcript so
+  // "clawprobe status" shows existing state without requiring daemon to have run first.
+  const transcriptPath = path.join(cfg.sessionsDir, `${sessionEntry.sessionKey}.jsonl`);
+  if (fs.existsSync(transcriptPath)) {
+    if (compactionCount === 0) {
+      try {
+        const { compactEvents } = parseAll(transcriptPath);
+        compactionCount = compactEvents.length;
+      } catch {
+        // ignore parse errors
+      }
+    }
+    if (lastActiveAt === 0) {
+      try {
+        lastActiveAt = Math.floor(fs.statSync(transcriptPath).mtimeMs / 1000);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   const model = snapshot?.model ?? sessionEntry.modelOverride ?? null;
-  const windowSize = getWindowSize(model);
+  const windowSize = getWindowSize(model, contextTokens);
   const utilization = contextTokens / windowSize;
   const isActive = !opts.session;
 
@@ -60,8 +74,8 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
       utilizationPct: Math.round(utilization * 100),
       inputTokens: sessionEntry.inputTokens,
       outputTokens: sessionEntry.outputTokens,
-      compactionCount: sessionEntry.compactionCount,
-      lastActiveAt: sessionEntry.updatedAt,
+      compactionCount,
+      lastActiveAt,
       isActive,
     });
     return;
@@ -81,10 +95,21 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
   console.log(
     `  This session: ${fmtTokens(sessionEntry.inputTokens)} in / ${fmtTokens(sessionEntry.outputTokens)} out`
   );
-  console.log(`  Compacts:  ${sessionEntry.compactionCount}`);
+  console.log(`  Compacts:  ${compactionCount}`);
 
-  if (sessionEntry.updatedAt) {
-    console.log(`  Last active: ${fmtDate(sessionEntry.updatedAt)}`);
+  if (lastActiveAt) {
+    console.log(`  Last active: ${fmtDate(lastActiveAt)}`);
+  }
+  if (
+    sessionEntry.inputTokens === 0 &&
+    sessionEntry.outputTokens === 0 &&
+    sessionEntry.contextTokens === 0 &&
+    fs.existsSync(transcriptPath)
+  ) {
+    console.log();
+    console.log(
+      severity.muted("  Token counts come from sessions.json. If OpenClaw hasn’t written them yet, run a turn or check your OpenClaw version.")
+    );
   }
 
   console.log();

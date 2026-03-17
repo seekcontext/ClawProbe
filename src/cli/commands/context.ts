@@ -3,22 +3,13 @@ import { openDb } from "../../core/db.js";
 import { getActiveSession } from "../../core/session-store.js";
 import { getLatestWorkspaceAnalysis } from "../../engines/file-analyzer.js";
 import {
-  header, makeTable, fmtTokens, truncBadge, outputJson, severity,
+  header, makeTable, fmtTokens, truncBadge, outputJson, severity, getWindowSize,
 } from "../format.js";
 
 interface ContextOptions {
   agent?: string;
   json?: boolean;
 }
-
-const MODEL_WINDOWS: Record<string, number> = {
-  "claude-opus-4": 200000,
-  "claude-sonnet-4.5": 200000,
-  "gpt-5.4": 128000,
-  "gpt-5.4-mini": 128000,
-  "gemini-3.1-flash": 1000000,
-  "deepseek-v3": 128000,
-};
 
 export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Promise<void> {
   const agent = opts.agent ?? cfg.probe.openclaw.agent;
@@ -33,11 +24,7 @@ export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Pro
 
   const activeSession = getActiveSession(cfg.sessionsDir);
   const contextTokens = activeSession?.contextTokens ?? 0;
-
-  const modelKey = activeSession?.modelOverride;
-  const windowSize = modelKey
-    ? (Object.entries(MODEL_WINDOWS).find(([k]) => modelKey.includes(k))?.[1] ?? 128000)
-    : 128000;
+  const windowSize = getWindowSize(activeSession?.modelOverride ?? null, contextTokens);
 
   if (opts.json) {
     outputJson({

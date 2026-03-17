@@ -40,7 +40,10 @@ export async function runSession(
       return;
     }
 
-    const table = makeTable(["Session Key", "Model", "Tokens (in/out)", "Cost", "Compacts", "Last Active"]);
+    const table = makeTable(
+      ["Session Key", "Model", "Tokens (in/out)", "Cost", "Compacts", "Last Active"],
+      [28, 22, 18, 10, 10, 14]
+    );
     for (const c of costs) {
       const isActive = active?.sessionKey === c.sessionKey;
       table.push([

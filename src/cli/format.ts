@@ -1,6 +1,70 @@
 import chalk from "chalk";
 import Table from "cli-table3";
 
+// --- Model context window sizes ---
+// Keys are lowercased substrings to match against model identifiers.
+// Listed from most-specific to least-specific so the first match wins.
+export const MODEL_WINDOWS: [string, number][] = [
+  // Anthropic – Gemini-era names
+  ["claude-opus-4",       200_000],
+  ["claude-sonnet-4",     200_000],  // covers sonnet-4, sonnet-4.5
+  ["claude-haiku-4",      200_000],
+  // Anthropic – older names still in circulation
+  ["claude-3-5-sonnet",   200_000],
+  ["claude-3-5-haiku",    200_000],
+  ["claude-3-opus",       200_000],
+  ["claude-3-sonnet",     200_000],
+  ["claude-3-haiku",      200_000],
+  ["claude-2",            100_000],
+  ["claude-instant",       100_000],
+  ["claude",              200_000],  // generic claude fallback
+  // OpenAI
+  ["gpt-5.4-mini",        128_000],
+  ["gpt-5.4",             128_000],
+  ["o4-mini",             128_000],
+  ["o4",                  128_000],
+  ["o3-mini",             128_000],
+  ["o3",                  128_000],
+  ["gpt-4o-mini",         128_000],
+  ["gpt-4o",              128_000],
+  ["gpt-4-turbo",         128_000],
+  ["gpt-4",               128_000],
+  ["gpt-3.5",              16_385],
+  // Google
+  ["gemini-3.1-flash",  1_000_000],
+  ["gemini-3.1-pro",    1_000_000],
+  ["gemini-2.0-flash",  1_000_000],
+  ["gemini-2.0-pro",    1_000_000],
+  ["gemini-1.5-flash",  1_000_000],
+  ["gemini-1.5-pro",    1_000_000],
+  ["gemini",            1_000_000],  // generic gemini fallback
+  // DeepSeek
+  ["deepseek-r2",         128_000],
+  ["deepseek-v3",         128_000],
+  ["deepseek",            128_000],
+  // Mistral / others
+  ["mixtral",              32_000],
+  ["mistral",              32_000],
+];
+
+/**
+ * Returns the context window size for a given model identifier.
+ * Falls back to the contextTokens value itself if it exceeds all known windows
+ * (avoids showing ">100%" when OpenClaw reports a larger-than-default context).
+ */
+export function getWindowSize(model: string | null, contextTokens = 0): number {
+  if (model) {
+    const lower = model.toLowerCase();
+    const match = MODEL_WINDOWS.find(([key]) => lower.includes(key));
+    if (match) {
+      // If the reported context already exceeds this window, trust the context.
+      return Math.max(match[1], contextTokens);
+    }
+  }
+  // Unknown model: use the larger of 200K default and whatever was reported.
+  return Math.max(200_000, contextTokens);
+}
+
 // --- Colors & Severity ---
 
 export const severity = {
@@ -75,9 +139,10 @@ export function fmtDuration(minutes: number): string {
 // --- Tables ---
 
 export function makeTable(head: string[], colWidths?: number[]): Table.Table {
+  const widths = colWidths ?? head.map(() => 16);
   return new Table({
     head: head.map((h) => chalk.bold.white(h)),
-    colWidths,
+    colWidths: widths,
     style: {
       head: [],
       border: ["gray"],
