@@ -158,28 +158,35 @@ async function processSessionsJson(
       sampled_at: now,
     });
 
-    // Record daily cost from jsonl transcript (most accurate source)
+    // Record daily cost using sessions.json totals (authoritative cumulative values)
+    // Use jsonl only to resolve model name if sessions.json doesn't have it.
     try {
-      const jsonlPath = findJsonlPath(cfg.sessionsDir, session);
-      if (jsonlPath) {
-        const stats = parseSessionStats(jsonlPath);
-        if (stats && stats.totalOutput > 0) {
-          recordDailyCost(
-            db,
-            agent,
-            session.sessionKey,
-            today,
-            stats.totalInput,
-            stats.totalOutput,
-            stats.model,
-            cfg.probe.cost.customPrices
-          );
-          console.log(`[daemon] cost recorded: ${session.sessionKey.slice(0, 30)} out=${stats.totalOutput} model=${stats.model}`);
-        } else {
-          console.log(`[daemon] cost skip: ${session.sessionKey.slice(0, 30)} — no output tokens in jsonl`);
+      const outputTokens = session.outputTokens;
+      const inputTokens = session.inputTokens;
+      let model = session.modelOverride ?? null;
+
+      if (!model) {
+        const jsonlPath = findJsonlPath(cfg.sessionsDir, session);
+        if (jsonlPath) {
+          const stats = parseSessionStats(jsonlPath);
+          if (stats?.model) model = stats.model;
         }
+      }
+
+      if (outputTokens > 0 || inputTokens > 0) {
+        recordDailyCost(
+          db,
+          agent,
+          session.sessionKey,
+          today,
+          inputTokens,
+          outputTokens,
+          model,
+          cfg.probe.cost.customPrices
+        );
+        console.log(`[daemon] cost recorded: ${session.sessionKey.slice(0, 30)} in=${inputTokens} out=${outputTokens} model=${model}`);
       } else {
-        console.log(`[daemon] cost skip: ${session.sessionKey.slice(0, 30)} — no jsonl found`);
+        console.log(`[daemon] cost skip: ${session.sessionKey.slice(0, 30)} — zero tokens in sessions.json`);
       }
     } catch (err) {
       console.error(`[daemon] cost record error for ${session.sessionKey}:`, err);
