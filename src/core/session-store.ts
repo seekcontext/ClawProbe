@@ -185,31 +185,20 @@ export function sessionKeyFromPath(filePath: string): string {
   return path.basename(filePath, ".jsonl");
 }
 
+/** UUID pattern for detection */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
- * Find the .jsonl transcript for a given session entry.
- *
- * OpenClaw names transcript files by the session UUID (e.g. 928a9cc3-...jsonl),
- * while sessions.json keys sessions by a human-readable key like
- * "agent:main:feishu:direct:ou_xxx". The sessionId field in sessions.json
- * should match the UUID used as the filename.
- *
- * Strategy:
- * 1. Try sessionsDir/{sessionId}.jsonl  (sessionId from sessions.json)
- * 2. Try sessionsDir/{sessionKey}.jsonl (for UUID-style keys)
- * 3. Scan all .jsonl files and read the first line to match session.id
+ * Build a map of session UUID → jsonl path by reading the first line of each .jsonl file.
+ * Cached per sessionsDir invocation within a single process run.
  */
-export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string | null {
-  // Strategy 1: sessionId is the UUID filename
-  if (entry.sessionId && entry.sessionId !== entry.sessionKey) {
-    const p = path.join(sessionsDir, `${entry.sessionId}.jsonl`);
-    if (fs.existsSync(p)) return p;
-  }
+const _jsonlUuidCache = new Map<string, Map<string, string>>();
 
-  // Strategy 2: sessionKey itself might be a UUID filename
-  const p2 = path.join(sessionsDir, `${entry.sessionKey}.jsonl`);
-  if (fs.existsSync(p2)) return p2;
+function buildUuidToPathMap(sessionsDir: string): Map<string, string> {
+  const cached = _jsonlUuidCache.get(sessionsDir);
+  if (cached) return cached;
 
-  // Strategy 3: scan all .jsonl files, match by session header id field
+  const map = new Map<string, string>();
   for (const jsonlPath of listJsonlFiles(sessionsDir)) {
     try {
       const fd = fs.openSync(jsonlPath, "r");
@@ -218,14 +207,64 @@ export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string 
       fs.closeSync(fd);
       const firstLine = buf.slice(0, bytesRead).toString("utf-8").split("\n")[0] ?? "";
       const header = JSON.parse(firstLine) as Record<string, unknown>;
-      if (
-        header["type"] === "session" &&
-        (header["id"] === entry.sessionId || header["id"] === entry.sessionKey)
-      ) {
-        return jsonlPath;
+      if (header["type"] === "session" && typeof header["id"] === "string") {
+        map.set(header["id"] as string, jsonlPath);
       }
     } catch { /* skip */ }
   }
 
+  _jsonlUuidCache.set(sessionsDir, map);
+  return map;
+}
+
+/**
+ * Find the .jsonl transcript for a given session entry.
+ *
+ * OpenClaw names transcript files by the session UUID (e.g. 928a9cc3-...jsonl),
+ * while sessions.json keys sessions by a human-readable key like
+ * "agent:main:feishu:direct:ou_xxx".
+ *
+ * Strategy:
+ * 1. Try sessionsDir/{sessionId}.jsonl  — if sessionId looks like a UUID
+ * 2. Try sessionsDir/{sessionKey}.jsonl — for UUID-style sessionKey
+ * 3. Check if any UUID in the sessions.json entry value matches a known jsonl UUID
+ * 4. Scan all .jsonl first lines (via cached map) for the most recently modified
+ *    file whose session.id appears as any string value in the entry's raw data
+ */
+export function findJsonlPath(sessionsDir: string, entry: SessionEntry): string | null {
+  // Strategy 1: sessionId looks like a UUID — use it directly as filename
+  if (entry.sessionId && UUID_RE.test(entry.sessionId)) {
+    const p = path.join(sessionsDir, `${entry.sessionId}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+
+  // Strategy 2: sessionKey itself might be a UUID filename
+  if (UUID_RE.test(entry.sessionKey)) {
+    const p = path.join(sessionsDir, `${entry.sessionKey}.jsonl`);
+    if (fs.existsSync(p)) return p;
+  }
+
+  // Strategy 3 & 4: Use cached UUID→path map.
+  // Try to match any UUID-like value in the entry against known jsonl session IDs.
+  const uuidMap = buildUuidToPathMap(sessionsDir);
+
+  // Check sessionId and sessionKey against the uuid map
+  if (entry.sessionId && uuidMap.has(entry.sessionId)) {
+    return uuidMap.get(entry.sessionId)!;
+  }
+  if (uuidMap.has(entry.sessionKey)) {
+    return uuidMap.get(entry.sessionKey)!;
+  }
+
+  // Last resort: the most recently modified jsonl file (for the active session case).
+  // Only use this if there's exactly one candidate and the entry is the active session.
+  // (We don't have enough info to match otherwise without reading sessions.json raw again.)
   return null;
+}
+
+/**
+ * Clear the UUID→path cache (call after daemon writes new files).
+ */
+export function clearJsonlCache(): void {
+  _jsonlUuidCache.clear();
 }

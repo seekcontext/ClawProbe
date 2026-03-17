@@ -20,7 +20,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.2.5";
+const VERSION = "0.2.6";
 
 const program = new Command();
 
@@ -289,8 +289,42 @@ program
           const sessions = readSessionsStore(cfg.sessionsDir);
           console.log(`  sessions.json: ${sessions.length} session(s) parsed`);
           sessions.slice(0, 3).forEach(s => {
-            console.log(`    • ${s.sessionKey}  in=${s.inputTokens} out=${s.outputTokens} ctx=${s.contextTokens}`);
+            console.log(`    • key:       ${s.sessionKey}`);
+            console.log(`      sessionId: ${s.sessionId}`);
+            console.log(`      in=${s.inputTokens} out=${s.outputTokens} ctx=${s.contextTokens}`);
           });
+
+          // Show raw sessions.json structure for the first entry (helps debug field names)
+          console.log(`\n  sessions.json raw (first entry keys):`);
+          try {
+            const raw = JSON.parse(readFileSync(sessJsonPath, "utf-8")) as Record<string, unknown>;
+            const sessMap = ("sessions" in raw && typeof raw["sessions"] === "object")
+              ? raw["sessions"] as Record<string, unknown>
+              : raw;
+            const firstKey = Object.keys(sessMap)[0];
+            if (firstKey) {
+              const firstVal = sessMap[firstKey] as Record<string, unknown>;
+              console.log(`    key: ${firstKey}`);
+              console.log(`    value fields: ${Object.keys(firstVal).join(", ")}`);
+              // Print any UUID-like field values
+              for (const [k, v] of Object.entries(firstVal)) {
+                if (typeof v === "string" && /^[0-9a-f-]{36}$/.test(v)) {
+                  console.log(`    ${k} = ${v}  ${chalk.green("← UUID")}`);
+                }
+              }
+            }
+          } catch (e) {
+            console.log(`    (failed to parse: ${e})`);
+          }
+
+          // Show UUID→sessionKey mapping from jsonl files
+          console.log(`\n  jsonl UUID → sessionKey mapping (first 5):`);
+          const { findJsonlPath } = await import("./core/session-store.js");
+          for (const s of sessions.slice(0, 5)) {
+            const p = findJsonlPath(cfg.sessionsDir, s);
+            const uuidFile = p ? require("path").basename(p) : chalk.red("NOT FOUND");
+            console.log(`    ${s.sessionKey.slice(0, 40)} → ${uuidFile}`);
+          }
         } else {
           console.log(`  ${chalk.red("✗")} sessions.json not found at ${sessJsonPath}`);
         }
