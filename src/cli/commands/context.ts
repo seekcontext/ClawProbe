@@ -3,6 +3,7 @@ import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
 import { getActiveSession } from "../../core/session-store.js";
+import { parseSessionStats } from "../../core/jsonl-parser.js";
 import { analyzeWorkspaceFiles } from "../../engines/file-analyzer.js";
 import {
   header, makeTable, fmtTokens, truncBadge, outputJson, severity, getWindowSize, divider,
@@ -57,10 +58,18 @@ export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Pro
   const analysis = analyzeWorkspaceFiles(cfg.workspaceDir, cfg.bootstrapMaxChars);
   const activeSession = getActiveSession(cfg.sessionsDir);
 
-  // sessionTokens = actual context usage; windowSize = upper limit
-  const sessionTokens = activeSession?.sessionTokens ?? 0;
+  // Read jsonl transcript for accurate context token count
+  const transcriptPath = activeSession
+    ? path.join(cfg.sessionsDir, `${activeSession.sessionKey}.jsonl`)
+    : null;
+  const jsonlStats = transcriptPath && fs.existsSync(transcriptPath)
+    ? parseSessionStats(transcriptPath)
+    : null;
+
+  // sessionTokens = actual context usage (from last assistant usage.totalTokens in jsonl)
+  const sessionTokens = jsonlStats?.lastTotalTokens ?? activeSession?.sessionTokens ?? 0;
   const windowSize = (activeSession?.windowSize || activeSession?.contextTokens) ?? 0;
-  const model = activeSession?.modelOverride ?? null;
+  const model = jsonlStats?.model ?? activeSession?.modelOverride ?? null;
   const resolvedWindowSize = getWindowSize(model, windowSize || sessionTokens);
 
   // ── Estimate fixed-cost components ──────────────────────────────────────

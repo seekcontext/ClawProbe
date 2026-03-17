@@ -8,6 +8,7 @@ import {
   upsertCostRecord,
 } from "../core/db.js";
 import type { SessionEntry } from "../core/session-store.js";
+import type { SessionStats } from "../core/jsonl-parser.js";
 
 // USD per 1M tokens
 export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
@@ -179,6 +180,47 @@ export function sessionCostFromEntry(
     compactionCount: entry.compactionCount,
     costAccurate: false,
     turns: [],
+  };
+}
+
+/**
+ * Build a SessionCost directly from parsed jsonl stats.
+ * This is the most accurate data source — usage comes from the model's own reported token counts.
+ */
+export function getSessionCostFromJsonl(
+  stats: SessionStats,
+  sessionKey: string,
+  customPrices: Record<string, { input: number; output: number }> = {}
+): SessionCost {
+  const model = stats.model;
+
+  const turns: TurnCost[] = stats.turns.map((t) => ({
+    turnIndex: t.turnIndex,
+    timestamp: t.timestamp,
+    inputTokensDelta: t.usage.input,
+    outputTokensDelta: t.usage.output,
+    estimatedUsd: estimateCost({ input: t.usage.input, output: t.usage.output }, model, customPrices),
+    compactOccurred: false, // compaction analysis done separately
+  }));
+
+  const totalUsd = turns.reduce((s, t) => s + t.estimatedUsd, 0);
+
+  return {
+    sessionKey,
+    model,
+    provider: stats.provider,
+    // totalInput = last turn's input (= current context size in tokens)
+    // totalOutput = cumulative output across all turns
+    inputTokens: stats.totalInput,
+    outputTokens: stats.totalOutput,
+    totalTokens: stats.totalInput + stats.totalOutput,
+    estimatedUsd: totalUsd,
+    startedAt: stats.startedAt,
+    lastActiveAt: stats.lastActiveAt,
+    durationMin: Math.round((stats.lastActiveAt - stats.startedAt) / 60),
+    compactionCount: stats.compactionCount,
+    costAccurate: true,
+    turns,
   };
 }
 

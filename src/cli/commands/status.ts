@@ -2,9 +2,9 @@ import fs from "fs";
 import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
-import { getActiveSession, readSessionsStore } from "../../core/session-store.js";
+import { getActiveSession, readSessionsStore, listJsonlFiles, sessionKeyFromPath } from "../../core/session-store.js";
 import { getLatestSnapshot } from "../../core/db.js";
-import { parseAll } from "../../core/jsonl-parser.js";
+import { parseAll, parseSessionStats } from "../../core/jsonl-parser.js";
 import {
   header, fmtTokens, fmtDate, fmtUsd, tokenBar, outputJson, printError, severity,
   getWindowSize,
@@ -31,34 +31,25 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
 
   const snapshot = getLatestSnapshot(db, agent, sessionEntry.sessionKey);
 
-  // sessionTokens = actual tokens currently in the model's context window
-  // (matches "Session tokens (cached): N total" in /context detail)
-  // windowSize = context window upper limit (ctx=256000)
-  // sessions.json's contextTokens field stores the window upper limit, NOT actual usage.
-  const sessionTokens = sessionEntry.sessionTokens;   // actual usage; 0 if not reported
-  const windowSize = sessionEntry.windowSize || sessionEntry.contextTokens; // upper limit
-
-  let compactionCount = sessionEntry.compactionCount;
-  let lastActiveAt = sessionEntry.updatedAt;
-
-  // When sessions.json has no token/compact data yet, derive from transcript.
+  // Prefer jsonl transcript as the authoritative source for actual context token count.
+  // Each assistant message reports `usage.totalTokens` = cumulative context at that turn.
   const transcriptPath = path.join(cfg.sessionsDir, `${sessionEntry.sessionKey}.jsonl`);
-  if (fs.existsSync(transcriptPath)) {
-    if (compactionCount === 0) {
-      try {
-        const { compactEvents } = parseAll(transcriptPath);
-        compactionCount = compactEvents.length;
-      } catch {
-        // ignore parse errors
-      }
-    }
-    if (lastActiveAt === 0) {
-      try {
-        lastActiveAt = Math.floor(fs.statSync(transcriptPath).mtimeMs / 1000);
-      } catch {
-        // ignore
-      }
-    }
+  const jsonlStats = fs.existsSync(transcriptPath) ? parseSessionStats(transcriptPath) : null;
+
+  // sessionTokens = actual tokens in context right now
+  // jsonlStats.lastTotalTokens is the most accurate (from last assistant message's usage.totalTokens)
+  const sessionTokens = jsonlStats?.lastTotalTokens ?? sessionEntry.sessionTokens;
+  const windowSize = sessionEntry.windowSize || sessionEntry.contextTokens; // upper limit from sessions.json
+
+  // Use jsonl stats for compaction count and last active time (more reliable)
+  let compactionCount = jsonlStats?.compactionCount ?? sessionEntry.compactionCount;
+  let lastActiveAt = jsonlStats?.lastActiveAt ?? sessionEntry.updatedAt;
+
+  // Final fallback: transcript mtime
+  if (lastActiveAt === 0 && fs.existsSync(transcriptPath)) {
+    try {
+      lastActiveAt = Math.floor(fs.statSync(transcriptPath).mtimeMs / 1000);
+    } catch { /* ignore */ }
   }
 
   const model = snapshot?.model ?? sessionEntry.modelOverride ?? null;
