@@ -1,6 +1,6 @@
 {
   "name": "clawprobe",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "The missing observability layer for OpenClaw agents",
   "keywords": ["openclaw", "ai-agent", "context", "observability", "llm"],
   "license": "MIT",

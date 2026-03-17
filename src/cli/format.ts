@@ -5,46 +5,102 @@ import Table from "cli-table3";
 // Keys are lowercased substrings to match against model identifiers.
 // Listed from most-specific to least-specific so the first match wins.
 export const MODEL_WINDOWS: [string, number][] = [
-  // Anthropic – Gemini-era names
-  ["claude-opus-4",       200_000],
-  ["claude-sonnet-4",     200_000],  // covers sonnet-4, sonnet-4.5
-  ["claude-haiku-4",      200_000],
-  // Anthropic – older names still in circulation
-  ["claude-3-5-sonnet",   200_000],
-  ["claude-3-5-haiku",    200_000],
-  ["claude-3-opus",       200_000],
-  ["claude-3-sonnet",     200_000],
-  ["claude-3-haiku",      200_000],
-  ["claude-2",            100_000],
-  ["claude-instant",       100_000],
-  ["claude",              200_000],  // generic claude fallback
-  // OpenAI
-  ["gpt-5.4-mini",        128_000],
-  ["gpt-5.4",             128_000],
-  ["o4-mini",             128_000],
-  ["o4",                  128_000],
-  ["o3-mini",             128_000],
-  ["o3",                  128_000],
-  ["gpt-4o-mini",         128_000],
-  ["gpt-4o",              128_000],
-  ["gpt-4-turbo",         128_000],
-  ["gpt-4",               128_000],
-  ["gpt-3.5",              16_385],
-  // Google
-  ["gemini-3.1-flash",  1_000_000],
-  ["gemini-3.1-pro",    1_000_000],
-  ["gemini-2.0-flash",  1_000_000],
-  ["gemini-2.0-pro",    1_000_000],
-  ["gemini-1.5-flash",  1_000_000],
-  ["gemini-1.5-pro",    1_000_000],
-  ["gemini",            1_000_000],  // generic gemini fallback
-  // DeepSeek
-  ["deepseek-r2",         128_000],
-  ["deepseek-v3",         128_000],
-  ["deepseek",            128_000],
-  // Mistral / others
-  ["mixtral",              32_000],
-  ["mistral",              32_000],
+  // ── Anthropic ──────────────────────────────────────────────────────────
+  ["claude-opus-4",         200_000],
+  ["claude-sonnet-4",       200_000],  // covers sonnet-4, sonnet-4.5
+  ["claude-haiku-4",        200_000],
+  ["claude-3-5-sonnet",     200_000],
+  ["claude-3-5-haiku",      200_000],
+  ["claude-3-opus",         200_000],
+  ["claude-3-sonnet",       200_000],
+  ["claude-3-haiku",        200_000],
+  ["claude-2",              100_000],
+  ["claude-instant",        100_000],
+  ["claude",                200_000],  // generic claude fallback
+
+  // ── OpenAI ─────────────────────────────────────────────────────────────
+  ["gpt-5.4-mini",          128_000],
+  ["gpt-5.4",               128_000],
+  ["o4-mini",               128_000],
+  ["o4",                    128_000],
+  ["o3-mini",               128_000],
+  ["o3",                    128_000],
+  ["gpt-4o-mini",           128_000],
+  ["gpt-4o",                128_000],
+  ["gpt-4-turbo",           128_000],
+  ["gpt-4",                 128_000],
+  ["gpt-3.5",                16_385],
+
+  // ── Google ─────────────────────────────────────────────────────────────
+  ["gemini-3.1-flash",    1_000_000],
+  ["gemini-3.1-pro",      1_000_000],
+  ["gemini-2.0-flash",    1_000_000],
+  ["gemini-2.0-pro",      1_000_000],
+  ["gemini-1.5-flash",    1_000_000],
+  ["gemini-1.5-pro",      1_000_000],
+  ["gemini",              1_000_000],  // generic gemini fallback
+
+  // ── DeepSeek ───────────────────────────────────────────────────────────
+  ["deepseek-v3.2",         131_000],  // V3.2-exp
+  ["deepseek-r2",           128_000],
+  ["deepseek-v3",           128_000],
+  ["deepseek-r1",           128_000],
+  ["deepseek",              128_000],
+
+  // ── Moonshot / Kimi ────────────────────────────────────────────────────
+  ["kimi-k2.5",             256_000],
+  ["kimi-k2",               256_000],
+  ["kimi-vl",               128_000],
+  ["kimi",                  128_000],  // generic kimi fallback
+  ["moonshot-v1-128k",      128_000],
+  ["moonshot-v1-32k",        32_000],
+  ["moonshot-v1-8k",          8_000],
+  ["moonshot",              128_000],
+
+  // ── Qwen / Alibaba ─────────────────────────────────────────────────────
+  ["qwen-long",          10_000_000],  // Qwen-Long: up to 10M tokens
+  ["qwen3-coder-plus",    1_000_000],
+  ["qwen3-coder",           256_000],  // native; supports 1M with YaRN
+  ["qwen-plus",           1_000_000],
+  ["qwen-turbo",          1_000_000],
+  ["qwen-flash",          1_000_000],
+  ["qwen3-max",             256_000],
+  ["qwen3",                 256_000],  // generic qwen3
+  ["qwen2.5",               128_000],
+  ["qwen2",                 128_000],
+  ["qwen",                  128_000],  // generic qwen fallback
+
+  // ── MiniMax ────────────────────────────────────────────────────────────
+  ["minimax-text-01",     4_000_000],  // 4M inference context
+  ["minimax-01",          4_000_000],
+  ["minimax",             4_000_000],  // generic minimax fallback
+
+  // ── Zhipu / GLM ────────────────────────────────────────────────────────
+  ["glm-5",                 200_000],
+  ["glm-4.7",               200_000],
+  ["glm-4.6",               200_000],
+  ["glm-4.5",               128_000],
+  ["glm-4",                 128_000],
+  ["glm",                   128_000],  // generic glm fallback
+
+  // ── ByteDance / Doubao ─────────────────────────────────────────────────
+  ["seed-code",             256_000],
+  ["seed-2.0",              256_000],
+  ["seed",                  256_000],
+  ["doubao-pro-128k",       128_000],
+  ["doubao-pro-32k",         32_000],
+  ["doubao",                128_000],  // generic doubao fallback
+
+  // ── Baidu / ERNIE ──────────────────────────────────────────────────────
+  ["ernie-5",               128_000],
+  ["ernie-4.5",             128_000],
+  ["ernie-4",               128_000],
+  ["ernie-3.5",             128_000],
+  ["ernie",                 128_000],  // generic ernie fallback
+
+  // ── Mistral ────────────────────────────────────────────────────────────
+  ["mixtral",                32_000],
+  ["mistral",                32_000],
 ];
 
 /**
