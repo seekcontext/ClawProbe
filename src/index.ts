@@ -20,7 +20,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.2.1";
+const VERSION = "0.2.2";
 
 const program = new Command();
 
@@ -110,6 +110,7 @@ const sessionCmd = program
   .command("session [session-key]")
   .description("Per-session cost and turn breakdown")
   .option("--list", "List all sessions")
+  .option("--full", "Show full session keys (no truncation)")
   .option("--no-turns", "Hide turn-by-turn timeline")
   .option("--agent <name>", "Target agent")
   .option("--json", "Output as JSON")
@@ -262,8 +263,10 @@ program
       const chalk = (await import("chalk")).default;
       const { openDb } = await import("./core/db.js");
       const { readSessionsStore, listJsonlFiles } = await import("./core/session-store.js");
+      const { LOCAL_TZ } = await import("./cli/format.js");
 
       console.log("\n" + chalk.bold("── Diagnostics ─────────────────────────────────────"));
+      console.log(`  Timezone:   ${LOCAL_TZ}  (set TZ=Asia/Shanghai or add {"timezone":"Asia/Shanghai"} to ~/.clawprobe/config.json to override)`);
 
       const check = (label: string, p: string) => {
         const ok = existsSync(p);

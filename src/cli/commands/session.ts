@@ -2,6 +2,7 @@ import { ResolvedConfig } from "../../core/config.js";
 import { openDb, getAllSessionKeys } from "../../core/db.js";
 import { getActiveSession, readSessionsStore } from "../../core/session-store.js";
 import { getSessionCost, getAllSessionCosts, estimateCost, sessionCostFromEntry } from "../../engines/cost.js";
+import chalk from "chalk";
 import {
   header, fmtUsd, fmtTokens, fmtDate, fmtDuration, makeTable, outputJson,
   severity, roleIcon, divider,
@@ -12,6 +13,7 @@ interface SessionOptions {
   list?: boolean;
   turns?: boolean;
   json?: boolean;
+  full?: boolean;
 }
 
 export async function runSession(
@@ -46,22 +48,40 @@ export async function runSession(
       return;
     }
 
-    const table = makeTable(
-      ["Session Key", "Model", "Tokens (in/out)", "Cost", "Compacts", "Last Active"],
-      [28, 22, 18, 10, 10, 14]
-    );
-    for (const c of costs) {
-      const isActive = active?.sessionKey === c.sessionKey;
-      table.push([
-        `${c.sessionKey.slice(0, 12)}…${isActive ? " ●" : ""}`,
-        c.model ?? "—",
-        `${fmtTokens(c.inputTokens)} / ${fmtTokens(c.outputTokens)}`,
-        c.estimatedUsd > 0 ? fmtUsd(c.estimatedUsd) : "—",
-        String(c.compactionCount),
-        c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—",
-      ]);
+    if (opts.full) {
+      // Full-width output: one session per line, no table truncation
+      for (const c of costs) {
+        const isActive = active?.sessionKey === c.sessionKey;
+        const activeTag = isActive ? chalk.green(" ●") : "";
+        console.log(`  ${chalk.bold(c.sessionKey)}${activeTag}`);
+        console.log(`    Model: ${c.model ?? "—"}   In: ${fmtTokens(c.inputTokens)}   Out: ${fmtTokens(c.outputTokens)}   Compacts: ${c.compactionCount}   Last: ${c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—"}`);
+        console.log();
+      }
+    } else {
+      const table = makeTable(
+        ["Session Key", "Model", "Tokens (in/out)", "Cost", "Compacts", "Last Active"],
+        [30, 22, 18, 10, 10, 16]
+      );
+      for (const c of costs) {
+        const isActive = active?.sessionKey === c.sessionKey;
+        // Show first 24 chars + ellipsis for readability; use --full for complete key
+        const keyDisplay = c.sessionKey.length > 25
+          ? `${c.sessionKey.slice(0, 24)}…${isActive ? " ●" : ""}`
+          : `${c.sessionKey}${isActive ? " ●" : ""}`;
+        table.push([
+          keyDisplay,
+          c.model ?? "—",
+          `${fmtTokens(c.inputTokens)} / ${fmtTokens(c.outputTokens)}`,
+          c.estimatedUsd > 0 ? fmtUsd(c.estimatedUsd) : "—",
+          String(c.compactionCount),
+          c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—",
+        ]);
+      }
+      console.log(table.toString());
+      if (costs.some(c => c.sessionKey.length > 25)) {
+        console.log(severity.muted("  Tip: use --full to see complete session keys"));
+      }
     }
-    console.log(table.toString());
     console.log();
     return;
   }

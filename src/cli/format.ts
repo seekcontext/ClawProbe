@@ -1,5 +1,7 @@
 import chalk from "chalk";
 import Table from "cli-table3";
+import fsSync from "fs";
+import osSync from "os";
 
 // --- Model context window sizes ---
 // Keys are lowercased substrings to match against model identifiers.
@@ -171,9 +173,33 @@ export function fmtTokens(n: number): string {
   return String(n);
 }
 
-// Resolve local timezone once at module load. Prefer TZ env var (set by user/OS),
-// then fall back to the system's IANA timezone via Intl.
-const LOCAL_TZ = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+// Resolve local timezone once at module load.
+// Priority: TZ env var → ~/.clawprobe/config.json "timezone" → /etc/localtime symlink → Intl default
+function resolveTimezone(): string {
+  if (process.env.TZ) return process.env.TZ;
+
+  // Try ~/.clawprobe/config.json "timezone" field
+  try {
+    const configPath = osSync.homedir() + "/.clawprobe/config.json";
+    if (fsSync.existsSync(configPath)) {
+      const cfg = JSON.parse(fsSync.readFileSync(configPath, "utf-8")) as Record<string, unknown>;
+      if (typeof cfg["timezone"] === "string" && cfg["timezone"]) {
+        return cfg["timezone"] as string;
+      }
+    }
+  } catch { /**/ }
+
+  // Try to derive from /etc/localtime symlink (Linux)
+  try {
+    const link = fsSync.readlinkSync("/etc/localtime");
+    const m = link.match(/zoneinfo\/(.+)$/);
+    if (m?.[1]) return m[1];
+  } catch { /**/ }
+
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+export const LOCAL_TZ = resolveTimezone();
 
 const _dateFmt = new Intl.DateTimeFormat("en-US", {
   timeZone: LOCAL_TZ,
