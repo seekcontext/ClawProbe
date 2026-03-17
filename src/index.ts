@@ -1,4 +1,8 @@
 #!/usr/bin/env -S node --disable-warning=ExperimentalWarning
+import { spawn } from "child_process";
+import { createWriteStream } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { Command } from "commander";
 import { resolveConfig, assertOpenClawExists } from "./core/config.js";
 import { startDaemon } from "./daemon.js";
@@ -17,7 +21,7 @@ import {
   runMemorySaveCompact,
 } from "./cli/commands/memory.js";
 
-const VERSION = "0.1.2";
+const VERSION = "0.1.3";
 
 const program = new Command();
 
@@ -32,10 +36,38 @@ program
   .description("Start the background daemon (watches OpenClaw files)")
   .option("--no-browser", "Do not open browser on start")
   .option("--daemon-only", "Start daemon only, no web server")
-  .action(async () => {
+  .option("--foreground", "Run daemon in foreground (don't detach)")
+  .action(async (opts: { foreground?: boolean }) => {
     const cfg = resolveConfig();
     assertOpenClawExists(cfg);
-    await startDaemon(cfg);
+
+    // Already the daemon process (spawned with CLAWPROBE_DAEMON=1)
+    if (process.env.CLAWPROBE_DAEMON === "1") {
+      await startDaemon(cfg);
+      return;
+    }
+
+    // Run in foreground if requested
+    if (opts.foreground) {
+      await startDaemon(cfg);
+      return;
+    }
+
+    // Spawn detached daemon and exit (nohup-style)
+    const entryPath = fileURLToPath(import.meta.url);
+    const daemonLogPath = path.join(cfg.probeDir, "daemon.log");
+    const logStream = createWriteStream(daemonLogPath, { flags: "a" });
+    const child = spawn(process.execPath, [entryPath, "start"], {
+      detached: true,
+      stdio: ["ignore", logStream, logStream],
+      env: { ...process.env, CLAWPROBE_DAEMON: "1" },
+      cwd: process.cwd(),
+    });
+    child.unref();
+    console.log("✓ clawprobe daemon started (detached)");
+    console.log(`✓ Watching: ${cfg.openclawDir}`);
+    console.log(`✓ Logs: ${daemonLogPath}`);
+    process.exit(0);
   });
 
 // --- stop ---
