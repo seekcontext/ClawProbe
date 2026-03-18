@@ -13,14 +13,6 @@ import { runSession } from "./cli/commands/session.js";
 import { runCompacts } from "./cli/commands/compacts.js";
 import { runContext } from "./cli/commands/context.js";
 import { runSuggest } from "./cli/commands/suggest.js";
-import {
-  runMemoryList,
-  runMemorySearch,
-  runMemoryAdd,
-  runMemoryEdit,
-  runMemoryDelete,
-  runMemorySaveCompact,
-} from "./cli/commands/memory.js";
 
 // Read version from package.json at runtime so it's always in sync
 const VERSION: string = JSON.parse(
@@ -31,7 +23,7 @@ const program = new Command();
 
 program
   .name("clawprobe")
-  .description("Context observability for OpenClaw agents")
+  .description("Know exactly what your OpenClaw agent is doing — token usage, cost, context health, and smart alerts in one place.")
   .version(VERSION);
 
 // --- start ---
@@ -196,11 +188,12 @@ program
   .option("--agent <name>", "Target agent")
   .option("--session <key>", "Filter by session")
   .option("--show-messages", "Show full message content")
+  .option("--save <id>", "Save a compact event's messages to memory")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
     const cfg = resolveConfig();
     assertOpenClawExists(cfg);
-    await runCompacts(cfg, { ...opts, last: parseInt(opts.last, 10) });
+    await runCompacts(cfg, { ...opts, last: parseInt(opts.last ?? "5", 10) });
   });
 
 // --- context ---
@@ -213,74 +206,6 @@ program
     const cfg = resolveConfig();
     assertOpenClawExists(cfg);
     await runContext(cfg, opts);
-  });
-
-// --- memory ---
-const memoryCmd = program
-  .command("memory")
-  .description("Memory management subcommands");
-
-memoryCmd
-  .command("list")
-  .description("List all memory entries")
-  .option("--file <path>", "Target memory file")
-  .option("--agent <name>", "Target agent")
-  .option("--json", "Output as JSON")
-  .action(async (opts) => {
-    const cfg = resolveConfig();
-    await runMemoryList(cfg, opts);
-  });
-
-memoryCmd
-  .command("search <query>")
-  .description("Search memory")
-  .option("--agent <name>", "Target agent")
-  .option("--limit <n>", "Max results", "10")
-  .option("--json", "Output as JSON")
-  .action(async (query, opts) => {
-    const cfg = resolveConfig();
-    await runMemorySearch(cfg, query as string, { ...opts, limit: parseInt(opts.limit, 10) });
-  });
-
-memoryCmd
-  .command("add <content>")
-  .description("Add entry to memory")
-  .option("--file <path>", "Target memory file")
-  .option("--agent <name>", "Target agent")
-  .action(async (content, opts) => {
-    const cfg = resolveConfig();
-    await runMemoryAdd(cfg, content as string, opts);
-  });
-
-memoryCmd
-  .command("edit <entry-id> [content]")
-  .description("Edit a memory entry (opens $EDITOR if content omitted)")
-  .option("--file <path>", "Target memory file")
-  .option("--agent <name>", "Target agent")
-  .action(async (entryId, content, opts) => {
-    const cfg = resolveConfig();
-    await runMemoryEdit(cfg, parseInt(entryId as string, 10), content as string | undefined, opts);
-  });
-
-memoryCmd
-  .command("delete <entry-id>")
-  .description("Delete a memory entry")
-  .option("--file <path>", "Target memory file")
-  .option("--agent <name>", "Target agent")
-  .option("--yes", "Skip confirmation")
-  .action(async (entryId, opts) => {
-    const cfg = resolveConfig();
-    await runMemoryDelete(cfg, parseInt(entryId as string, 10), opts);
-  });
-
-memoryCmd
-  .command("save-compact <compact-id>")
-  .description("Save compacted messages from a compact event to memory")
-  .option("--file <path>", "Target memory file")
-  .option("--agent <name>", "Target agent")
-  .action(async (compactId, opts) => {
-    const cfg = resolveConfig();
-    await runMemorySaveCompact(cfg, parseInt(compactId as string, 10), opts);
   });
 
 // --- suggest ---
@@ -404,14 +329,14 @@ program
       if (existsSync(dbPath)) {
         try {
           const db = openDb(cfg.probeDir);
-          const snapCount = (db.prepare("SELECT COUNT(*) as n FROM session_snapshots").get() as { n: number }).n;
-          const fileCount = (db.prepare("SELECT COUNT(*) as n FROM file_snapshots").get() as { n: number }).n;
-          const costCount = (db.prepare("SELECT COUNT(*) as n FROM cost_records").get() as { n: number }).n;
+          const snapCount    = (db.prepare("SELECT COUNT(*) as n FROM session_snapshots").get() as { n: number }).n;
+          const fileCount    = (db.prepare("SELECT COUNT(*) as n FROM file_snapshots").get() as { n: number }).n;
+          const turnCount    = (db.prepare("SELECT COUNT(*) as n FROM turn_records").get() as { n: number }).n;
           const compactCount = (db.prepare("SELECT COUNT(*) as n FROM compact_events").get() as { n: number }).n;
           console.log(`\n  probe.db row counts:`);
           console.log(`    session_snapshots: ${snapCount}`);
           console.log(`    file_snapshots:    ${fileCount}`);
-          console.log(`    cost_records:      ${costCount}`);
+          console.log(`    turn_records:      ${turnCount}`);
           console.log(`    compact_events:    ${compactCount}`);
           if (snapCount === 0) {
             console.log(`\n  ${chalk.yellow("⚠")} session_snapshots is empty.`);

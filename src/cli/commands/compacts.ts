@@ -1,20 +1,51 @@
+import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb, getCompactEvents, getCompactEventById } from "../../core/db.js";
-import { qualityBadge, header, fmtDate, fmtTokens, roleIcon, outputJson, severity, divider } from "../format.js";
+import { saveCompactedMessages } from "../../core/memory-editor.js";
+import { header, fmtDate, fmtTokens, roleIcon, outputJson, severity, divider, printSuccess, printError } from "../format.js";
+import type { MessageEntry } from "../../core/jsonl-parser.js";
 
 interface CompactsOptions {
   agent?: string;
   session?: string;
   last?: number;
   showMessages?: boolean;
+  save?: string;
   json?: boolean;
 }
 
 export async function runCompacts(cfg: ResolvedConfig, opts: CompactsOptions): Promise<void> {
   const agent = opts.agent ?? cfg.probe.openclaw.agent;
   const db = openDb(cfg.probeDir);
-  const limit = opts.last ?? 5;
 
+  // --save <id>: save a compact event's messages to memory
+  if (opts.save !== undefined) {
+    const compactId = parseInt(opts.save, 10);
+    if (isNaN(compactId)) {
+      printError(`Invalid compact ID: ${opts.save}`);
+      process.exit(1);
+    }
+    const event = getCompactEventById(db, compactId);
+    if (!event) {
+      printError(`Compact event #${compactId} not found.`);
+      process.exit(1);
+    }
+    const messages: MessageEntry[] = event.compacted_messages
+      ? JSON.parse(event.compacted_messages) as MessageEntry[]
+      : [];
+    if (messages.length === 0) {
+      console.log(severity.muted("  No messages to save for this compact event."));
+      return;
+    }
+    const memFile = path.join(cfg.workspaceDir, cfg.probe.memory.defaultFile);
+    const relFile = path.relative(cfg.workspaceDir, memFile);
+    const label = event.compacted_at ? fmtDate(event.compacted_at) : `compact-${compactId}`;
+    saveCompactedMessages(memFile, messages, label);
+    printSuccess(`Saved ${messages.length} messages from compact #${compactId} to ${relFile}`);
+    return;
+  }
+
+  const limit = opts.last ?? 5;
   const events = getCompactEvents(db, agent, limit, opts.session);
 
   if (opts.json) {
@@ -80,7 +111,7 @@ export async function runCompacts(cfg: ResolvedConfig, opts: CompactsOptions): P
     }
 
     console.log();
-    console.log(`    ${severity.muted("→ Save to memory:")} clawprobe memory save-compact ${event.id}`);
+    console.log(`    ${severity.muted("→ Save to memory:")} clawprobe compacts --save ${event.id}`);
 
     if (i < events.length - 1) {
       console.log();

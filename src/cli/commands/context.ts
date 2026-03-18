@@ -1,12 +1,10 @@
-import fs from "fs";
-import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
 import { getActiveSession, findJsonlPath } from "../../core/session-store.js";
 import { parseSessionStats } from "../../core/jsonl-parser.js";
 import { analyzeWorkspaceFiles } from "../../engines/file-analyzer.js";
 import {
-  header, makeTable, computeColWidths, fmtTokens, truncBadge, outputJson, severity, getWindowSize, divider,
+  header, fmtTokens, tokenBar, outputJson, severity, getWindowSize,
 } from "../format.js";
 
 interface ContextOptions {
@@ -14,214 +12,91 @@ interface ContextOptions {
   json?: boolean;
 }
 
-/** Rough token estimate: chars / 4 */
-function estTok(chars: number): number {
-  return Math.ceil(chars / 4);
-}
-
-function fmtTok(n: number): string {
-  return `~${fmtTokens(n)} tok`;
-}
-
-/** Try to read a text file from the workspace dir */
-function readWsFile(workspaceDir: string, name: string): string | null {
-  const p = path.join(workspaceDir, name);
-  if (!fs.existsSync(p)) return null;
-  try { return fs.readFileSync(p, "utf-8"); } catch { return null; }
-}
-
-/** Scan skill files in workspace (*.skill.md or skills/ subdir) */
-interface SkillInfo { name: string; chars: number; }
-function scanSkills(workspaceDir: string): SkillInfo[] {
-  const results: SkillInfo[] = [];
-  if (!fs.existsSync(workspaceDir)) return results;
-
-  // skills/ subdirectory
-  const skillsDir = path.join(workspaceDir, "skills");
-  if (fs.existsSync(skillsDir) && fs.statSync(skillsDir).isDirectory()) {
-    for (const f of fs.readdirSync(skillsDir)) {
-      if (f.endsWith(".md") || f.endsWith(".txt")) {
-        try {
-          const content = fs.readFileSync(path.join(skillsDir, f), "utf-8");
-          results.push({ name: path.basename(f, path.extname(f)), chars: content.length });
-        } catch { /* skip */ }
-      }
-    }
-  }
-  return results.sort((a, b) => b.chars - a.chars);
-}
-
 export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Promise<void> {
   const agent = opts.agent ?? cfg.probe.openclaw.agent;
   const db = openDb(cfg.probeDir);
 
-  const analysis = analyzeWorkspaceFiles(cfg.workspaceDir, cfg.bootstrapMaxChars);
   const activeSession = getActiveSession(cfg.sessionsDir);
-
-  // Read jsonl transcript for accurate context token count.
-  // Transcripts are named by session UUID, not the human-readable sessionKey.
   const transcriptPath = activeSession ? findJsonlPath(cfg.sessionsDir, activeSession) : null;
   const jsonlStats = transcriptPath ? parseSessionStats(transcriptPath) : null;
 
-  // sessionTokens = actual context usage (from last assistant usage.totalTokens in jsonl)
   const sessionTokens = jsonlStats?.lastTotalTokens ?? activeSession?.sessionTokens ?? 0;
   const windowSize = (activeSession?.windowSize || activeSession?.contextTokens) ?? 0;
   const model = jsonlStats?.model ?? activeSession?.modelOverride ?? null;
   const resolvedWindowSize = getWindowSize(model, windowSize || sessionTokens);
 
-  // ── Estimate fixed-cost components ──────────────────────────────────────
-  // System prompt: read SOUL.md as proxy if present; otherwise estimate from known agents
-  const soulContent = readWsFile(cfg.workspaceDir, "SOUL.md") ?? "";
-  const agentsContent = readWsFile(cfg.workspaceDir, "AGENTS.md") ?? "";
-  const identityContent = readWsFile(cfg.workspaceDir, "IDENTITY.md") ?? "";
-  const heartbeatContent = readWsFile(cfg.workspaceDir, "HEARTBEAT.md") ?? "";
-  const bootstrapContent = readWsFile(cfg.workspaceDir, "BOOTSTRAP.md") ?? "";
-
-  // Skills
-  const skills = scanSkills(cfg.workspaceDir);
-  const skillsChars = skills.reduce((s, sk) => s + sk.chars, 0);
-
-  // Workspace files total (injected)
-  const wsFiles = analysis.files;
-  const wsTotalInjectedChars = wsFiles.reduce((s, f) => s + f.injectedChars, 0);
-  const wsTotalInjectedTokens = wsFiles.reduce((s, f) => s + f.injectedEstTokens, 0);
-
-  // Session history = sessionTokens - all fixed overhead
-  // Fixed overhead = workspace files + system prompt estimate
-  const fixedOverheadTokens = wsTotalInjectedTokens;
-  const sessionHistoryTokens = sessionTokens > fixedOverheadTokens
-    ? sessionTokens - fixedOverheadTokens
+  // Workspace analysis: just the token overhead summary, no per-file table
+  const analysis = analyzeWorkspaceFiles(cfg.workspaceDir, cfg.bootstrapMaxChars);
+  const wsTotalInjectedTokens = analysis.files.reduce((s, f) => s + f.injectedEstTokens, 0);
+  const sessionHistoryTokens = sessionTokens > wsTotalInjectedTokens
+    ? sessionTokens - wsTotalInjectedTokens
     : sessionTokens > 0 ? sessionTokens : 0;
 
   if (opts.json) {
     outputJson({
       agent,
-      workspaceDir: cfg.workspaceDir,
-      bootstrapMaxChars: cfg.bootstrapMaxChars,
       sessionTokens,
       windowSize: resolvedWindowSize,
       utilizationPct: resolvedWindowSize > 0 ? Math.round(sessionTokens / resolvedWindowSize * 100) : 0,
-      workspaceFiles: wsFiles.map((f) => ({
-        name: f.name,
-        rawChars: f.rawChars,
-        injectedChars: f.injectedChars,
-        wasTruncated: f.wasTruncated,
-        estTokens: f.injectedEstTokens,
-      })),
+      workspaceOverheadTokensEst: wsTotalInjectedTokens,
       sessionHistoryTokensEst: sessionHistoryTokens,
+      truncatedFiles: analysis.truncatedFiles.map((f) => ({
+        name: f.name,
+        lostPct: Math.round(f.lostPercent),
+      })),
     });
     return;
   }
 
-  header("🔍", "Context Analysis", `agent: ${agent}`);
+  header("🔍", "Context Window", `agent: ${agent}`);
 
   // ── Overall context bar ──────────────────────────────────────────────────
   if (sessionTokens > 0) {
-    const { tokenBar } = await import("../format.js");
     const pct = Math.round(sessionTokens / resolvedWindowSize * 100);
+    const ctxColor = pct > 90 ? severity.critical : pct > 70 ? severity.warning : (s: string) => s;
     console.log(
-      `  Context used:  ${fmtTokens(sessionTokens)} / ${fmtTokens(resolvedWindowSize)} tokens  ` +
-      `${tokenBar(sessionTokens, resolvedWindowSize)}  ${pct}%`
+      `  Used:    ${ctxColor(`${fmtTokens(sessionTokens)} / ${fmtTokens(resolvedWindowSize)} tokens`)}` +
+      `  ${tokenBar(sessionTokens, resolvedWindowSize)}  ${pct}%`
     );
-    console.log();
   } else {
-    console.log(severity.muted(`  Context window: ${fmtTokens(resolvedWindowSize)} tokens (actual usage not available)`));
+    console.log(severity.muted(`  Context window: ${fmtTokens(resolvedWindowSize)} tokens  (no session data yet)`));
     console.log();
+    console.log(severity.muted("  Start OpenClaw and run a turn, then try again."));
+    console.log();
+    return;
   }
 
-  // ── Workspace directory info ─────────────────────────────────────────────
-  console.log(severity.muted(`  Workspace:        ${cfg.workspaceDir}`));
-  console.log(severity.muted(`  Bootstrap max:    ${cfg.bootstrapMaxChars.toLocaleString()} chars / file`));
+  // ── Breakdown ────────────────────────────────────────────────────────────
   console.log();
+  console.log(`  Workspace overhead:  ~${fmtTokens(wsTotalInjectedTokens)} tokens  ${severity.muted(`(${analysis.files.length} injected files)`)}`);
+  console.log(`  Conversation est:    ~${fmtTokens(sessionHistoryTokens)} tokens  ${severity.muted("(messages + system prompt + tools)")}`);
 
-  // ── Injected workspace files ─────────────────────────────────────────────
-  console.log(severity.bold("  Injected workspace files:"));
-  console.log();
-
-  if (wsFiles.length === 0) {
-    console.log(severity.muted("    (none found)"));
-  } else {
-    const head = ["File", "Raw", "Injected", "~Tokens", "Status"];
-    const rows = wsFiles.map((f) => [
-      f.name,
-      `${f.rawChars.toLocaleString()} chars`,
-      `${f.injectedChars.toLocaleString()} chars`,
-      fmtTok(f.injectedEstTokens),
-      truncBadge(f.wasTruncated),
-    ]);
-    const colWidths = computeColWidths(head, rows, [18, 14, 14, 10, 12]);
-    const table = makeTable(head, colWidths);
-    for (const row of rows) table.push(row);
-    console.log(table.toString());
-
-    if (analysis.truncatedFiles.length > 0) {
-      for (const f of analysis.truncatedFiles) {
-        console.log(
-          severity.warning(
-            `  ⚠ ${f.name}: ${f.lostChars.toLocaleString()} chars (${Math.round(f.lostPercent)}%) truncated — model never sees this content`
-          )
-        );
-      }
-      console.log();
+  // ── Truncation warnings ──────────────────────────────────────────────────
+  if (analysis.truncatedFiles.length > 0) {
+    console.log();
+    for (const f of analysis.truncatedFiles) {
+      console.log(
+        severity.warning(`  ⚠ ${f.name}: ${Math.round(f.lostPercent)}% truncated — model never sees this content`)
+      );
     }
-
-    console.log(
-      `  Workspace subtotal:  ~${fmtTokens(wsTotalInjectedTokens)} tokens  ` +
-      severity.muted(`(${wsFiles.length} files, ${wsTotalInjectedChars.toLocaleString()} chars injected)`)
-    );
-  }
-  console.log();
-
-  // ── Skills (if found) ────────────────────────────────────────────────────
-  if (skills.length > 0) {
-    console.log(severity.bold(`  Skills (${skills.length} loaded):`));
-    console.log();
-    const skillHead = ["Skill", "Chars", "~Tokens"];
-    const skillRows = skills.slice(0, 10).map((sk) => [
-      sk.name,
-      sk.chars.toLocaleString(),
-      fmtTok(estTok(sk.chars)),
-    ]);
-    if (skills.length > 10) {
-      skillRows.push([`… +${skills.length - 10} more`, "", ""]);
-    }
-    const skillColWidths = computeColWidths(skillHead, skillRows, [24, 12, 10]);
-    const skillTable = makeTable(skillHead, skillColWidths);
-    for (const row of skillRows) skillTable.push(row);
-    console.log(skillTable.toString());
-    console.log(`  Skills subtotal:  ~${fmtTokens(estTok(skillsChars))} tokens`);
-    console.log();
+    console.log(severity.muted("    Run: clawprobe context --json  or increase bootstrapMaxChars in openclaw.json"));
   }
 
-  // ── Session history estimate ─────────────────────────────────────────────
-  if (sessionTokens > 0) {
-    console.log(severity.bold("  Session history estimate:"));
-    console.log();
-    console.log(`  Total in context:  ${fmtTokens(sessionTokens)} tokens`);
-    console.log(`  Fixed overhead:    ~${fmtTokens(fixedOverheadTokens)} tokens  ` +
-      severity.muted("(workspace files)"));
-    console.log(`  Conversation est:  ~${fmtTokens(sessionHistoryTokens)} tokens  ` +
-      severity.muted("(messages + system prompt + tools)"));
-    console.log();
-    console.log(severity.muted("  Note: For exact breakdown, run: /context detail  inside OpenClaw"));
-  } else {
-    console.log(severity.muted("  Session token data not available."));
-    console.log(severity.muted("  Start a session and ensure the daemon is running: clawprobe start"));
-  }
-
-  console.log();
-
-  // ── Remaining headroom ───────────────────────────────────────────────────
-  if (sessionTokens > 0 && resolvedWindowSize > 0) {
+  // ── Remaining headroom ────────────────────────────────────────────────────
+  if (resolvedWindowSize > 0) {
     const remaining = resolvedWindowSize - sessionTokens;
     const remainingPct = Math.round(remaining / resolvedWindowSize * 100);
-    console.log(
-      severity.bold("  Remaining headroom:") +
-      `  ${fmtTokens(remaining)} tokens (${remainingPct}%)`
-    );
-    if (remaining < resolvedWindowSize * 0.1) {
-      console.log(severity.warning("  ⚠ Less than 10% context remaining — compaction may be needed soon"));
-    }
     console.log();
+    const headroomStr = `  Remaining:  ${fmtTokens(remaining)} tokens (${remainingPct}%)`;
+    if (remainingPct < 10) {
+      console.log(severity.critical(headroomStr));
+      console.log(severity.warning("  ⚠ Less than 10% remaining — compaction or new session recommended"));
+    } else if (remainingPct < 25) {
+      console.log(severity.warning(headroomStr));
+    } else {
+      console.log(headroomStr);
+    }
   }
+
+  console.log();
 }

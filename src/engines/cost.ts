@@ -104,6 +104,10 @@ export interface PeriodCostSummary {
   totalUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** Cost attributable to input tokens (computed at actual per-model rates) */
+  inputUsd: number;
+  /** Cost attributable to output tokens (computed at actual per-model rates) */
+  outputUsd: number;
   dailyAvg: number;
   monthEstimate: number;
   daily: DailyCost[];
@@ -412,14 +416,15 @@ export function getPeriodCost(
   const rows = getTurnRows(db, agent, days);
 
   const byDate = new Map<string, {
-    usd: number; input: number; output: number;
+    usd: number; inputUsd: number; outputUsd: number;
+    input: number; output: number;
     cacheRead: number; cacheWrite: number; unpriced: string[];
   }>();
 
   for (const row of rows) {
     let entry = byDate.get(row.date);
     if (!entry) {
-      entry = { usd: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unpriced: [] };
+      entry = { usd: 0, inputUsd: 0, outputUsd: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unpriced: [] };
       byDate.set(row.date, entry);
     }
     entry.input     += row.input_tokens;
@@ -428,16 +433,31 @@ export function getPeriodCost(
     entry.cacheWrite+= row.cache_write;
 
     if (row.model) {
-      const recomputed = estimateCost(
-        { input: row.input_tokens, output: row.output_tokens,
+      // Compute input-side and output-side costs separately at actual per-model rates.
+      // Input-side includes normal input + cache read/write (all charged against input tokens).
+      // Output-side is purely the generated output tokens.
+      const inputOnly  = estimateCost(
+        { input: row.input_tokens, output: 0,
           cacheRead: row.cache_read, cacheWrite: row.cache_write },
-        row.model,
-        customPrices
+        row.model, customPrices
       );
+      const outputOnly = estimateCost(
+        { input: 0, output: row.output_tokens },
+        row.model, customPrices
+      );
+      const recomputed = inputOnly + outputOnly;
       if (recomputed > 0) {
-        entry.usd += recomputed;
+        entry.usd      += recomputed;
+        entry.inputUsd  += inputOnly;
+        entry.outputUsd += outputOnly;
       } else {
+        // Unpriced model — fall back to stored estimate, split by token ratio as best effort
         entry.usd += row.estimated_usd;
+        const total = row.input_tokens + row.output_tokens;
+        if (total > 0) {
+          entry.inputUsd  += row.estimated_usd * (row.input_tokens / total);
+          entry.outputUsd += row.estimated_usd * (row.output_tokens / total);
+        }
         if (!entry.unpriced.includes(row.model)) entry.unpriced.push(row.model);
       }
     } else {
@@ -460,6 +480,8 @@ export function getPeriodCost(
   const totalUsd    = daily.reduce((s, d) => s + d.usd, 0);
   const totalInput  = daily.reduce((s, d) => s + d.inputTokens, 0);
   const totalOutput = daily.reduce((s, d) => s + d.outputTokens, 0);
+  const totalInputUsd  = [...byDate.values()].reduce((s, e) => s + e.inputUsd, 0);
+  const totalOutputUsd = [...byDate.values()].reduce((s, e) => s + e.outputUsd, 0);
   // Use the full window span (not just active days) so monthEstimate reflects
   // true average spend including idle days.
   // For "all" period there's no fixed window, fall back to actual active days.
@@ -473,6 +495,8 @@ export function getPeriodCost(
     totalUsd,
     inputTokens: totalInput,
     outputTokens: totalOutput,
+    inputUsd: totalInputUsd,
+    outputUsd: totalOutputUsd,
     dailyAvg,
     monthEstimate: dailyAvg * 30,
     daily,

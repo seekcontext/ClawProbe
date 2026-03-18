@@ -57,13 +57,14 @@ export async function runCost(cfg: ResolvedConfig, opts: CostOptions): Promise<v
   }
 
   console.log();
+  const totalCostForPct = Math.max(summary.inputUsd + summary.outputUsd, 0.000001);
   console.log(
-    `  Input:   ${fmtTokens(summary.inputTokens)} tokens  ${fmtUsd(summary.totalUsd * (summary.inputTokens / Math.max(summary.inputTokens + summary.outputTokens, 1)))}` +
-    `  (${Math.round((summary.inputTokens / Math.max(summary.inputTokens + summary.outputTokens, 1)) * 100)}%)`
+    `  Input:   ${fmtTokens(summary.inputTokens)} tokens  ${fmtUsd(summary.inputUsd)}` +
+    `  (${Math.round((summary.inputUsd / totalCostForPct) * 100)}%)`
   );
   console.log(
-    `  Output:  ${fmtTokens(summary.outputTokens)} tokens  ${fmtUsd(summary.totalUsd * (summary.outputTokens / Math.max(summary.inputTokens + summary.outputTokens, 1)))}` +
-    `  (${Math.round((summary.outputTokens / Math.max(summary.inputTokens + summary.outputTokens, 1)) * 100)}%)`
+    `  Output:  ${fmtTokens(summary.outputTokens)} tokens  ${fmtUsd(summary.outputUsd)}` +
+    `  (${Math.round((summary.outputUsd / totalCostForPct) * 100)}%)`
   );
 
   if (cfg.probe.alerts.dailyBudgetUsd) {

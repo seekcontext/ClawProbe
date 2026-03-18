@@ -4,7 +4,7 @@ import { getCompactEvents, getSuggestions, upsertSuggestion, removeSuggestion, g
 import { getWindowSize } from "../core/model-windows.js";
 import { parseSessionStats } from "../core/jsonl-parser.js";
 import { findJsonlPath, getActiveSession } from "../core/session-store.js";
-import { analyzeWorkspaceFiles, getFileStaleness } from "./file-analyzer.js";
+import { analyzeWorkspaceFiles } from "./file-analyzer.js";
 import { ProbeConfig } from "../core/config.js";
 
 export interface Suggestion {
@@ -194,29 +194,6 @@ const MemoryBloatRule: Rule = {
   },
 };
 
-const StaleFilesRule: Rule = {
-  id: "stale-workspace-files",
-  name: "Stale Workspace Files",
-  check({ workspaceDir }) {
-    const stale = getFileStaleness(workspaceDir).filter(
-      (f) => f.daysSinceModified > 30
-    );
-    if (stale.length < 2) return null;
-
-    const names = stale.map((f) => f.name).join(", ");
-
-    return {
-      ruleId: "stale-workspace-files",
-      severity: "info",
-      title: `${stale.length} workspace files unchanged for 30+ days`,
-      detail:
-        `${names} haven't been modified in over a month but still consume ` +
-        `context tokens in every session. They may be outdated or unnecessary.`,
-      action: "Review and trim or archive files that are no longer relevant",
-    };
-  },
-};
-
 // --- Engine ---
 
 const BUILT_IN_RULES: Rule[] = [
@@ -225,7 +202,6 @@ const BUILT_IN_RULES: Rule[] = [
   ContextLeakRule,
   CostSpikeRule,
   MemoryBloatRule,
-  StaleFilesRule,
 ];
 
 export function runRules(
