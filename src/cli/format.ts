@@ -211,6 +211,12 @@ export function divider(): void {
   console.log(chalk.dim("─".repeat(50)));
 }
 
+// --- Cost disclaimer ---
+
+export function printCostDisclaimer(): void {
+  console.log(severity.muted("  Costs are estimates based on public pricing. Verify with your provider's billing dashboard."));
+}
+
 // --- JSON output helper ---
 
 export function outputJson(data: unknown): void {

@@ -2,7 +2,7 @@ import { ResolvedConfig } from "../../core/config.js";
 import { openDb } from "../../core/db.js";
 import { getPeriodCost } from "../../engines/cost.js";
 import {
-  header, fmtUsd, fmtTokens, costBar, outputJson, severity,
+  header, fmtUsd, fmtTokens, costBar, outputJson, severity, printCostDisclaimer,
 } from "../format.js";
 
 interface CostOptions {
@@ -81,5 +81,7 @@ export async function runCost(cfg: ResolvedConfig, opts: CostOptions): Promise<v
     console.log(severity.muted(`    Add to ~/.clawprobe/config.json → cost.customPrices to enable cost tracking.`));
   }
 
+  console.log();
+  printCostDisclaimer();
   console.log();
 }

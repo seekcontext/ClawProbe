@@ -10,7 +10,7 @@ import {
 import chalk from "chalk";
 import {
   header, fmtUsd, fmtTokens, fmtDate, fmtDuration, makeTable, computeColWidths, outputJson,
-  severity,
+  severity, printCostDisclaimer,
 } from "../format.js";
 
 interface SessionOptions {
@@ -184,6 +184,8 @@ export async function runSession(
       }
     }
     console.log();
+    printCostDisclaimer();
+    console.log();
     return;
   }
 
@@ -261,5 +263,7 @@ export async function runSession(
     ));
   }
 
+  console.log();
+  printCostDisclaimer();
   console.log();
 }
