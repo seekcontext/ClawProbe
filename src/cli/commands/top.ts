@@ -175,28 +175,37 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
     (cacheRead > 0 ? `  Cache read   ${fmtTokens(cacheRead)} tok` : "")
   );
 
-  // Recent turns
+  // Recent turns — show as many as the terminal height allows
   const turnList = sessionCost?.turns ?? [];
   if (turnList.length > 0) {
     lines.push("");
     lines.push(hr);
     lines.push(chalk.bold("  Recent turns"));
     lines.push(
-      chalk.dim("  " + ["Turn", "Time", "ΔInput", "ΔOutput", "Cost", "Note"].map((h, i) => h.padEnd([6, 10, 9, 9, 10, 0][i]!)).join(""))
+      chalk.dim("  " + ["Turn", "Time", "ΔInput", "ΔOutput", "Cost", "Note"].map((h, i) => h.padEnd([6, 10, 9, 9, 12, 0][i]!)).join(""))
     );
-    const recentTurns = turnList.slice(-6).reverse();
+
+    // Reserve lines for: header block (~10) + separator + heading + col-header + footer (~3)
+    // Fill the remaining terminal rows with turn rows (min 4, max all turns)
+    const termH = process.stdout.rows || 30;
+    const reservedLines = lines.length + 3; // footer lines below turns
+    const maxTurnRows = Math.max(4, termH - reservedLines - 2);
+    const recentTurns = turnList.slice(-maxTurnRows).reverse();
+
     recentTurns.forEach((turn, idx) => {
       const isLatest = idx === 0;
       const timeStr = turn.timestamp > 0
         ? new Intl.DateTimeFormat("en-US", { timeZone: LOCAL_TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(turn.timestamp * 1000))
         : "--:--";
       const note = turn.compactOccurred ? chalk.cyan("◆ compact") : isLatest ? chalk.dim("← latest") : "";
+      // Use plain-text width for cost column to avoid ANSI code padding issues
+      const costPlain = `$${turn.estimatedUsd > 0 ? turn.estimatedUsd.toFixed(turn.estimatedUsd < 0.01 ? 4 : 2) : "0.00"}`;
       const line = "  " + [
         String(turn.turnIndex).padEnd(6),
         timeStr.padEnd(10),
         fmtTokens(turn.inputTokensDelta).padEnd(9),
         fmtTokens(turn.outputTokensDelta).padEnd(9),
-        fmtUsd(turn.estimatedUsd).padEnd(10),
+        costPlain.padEnd(12),
         note,
       ].join("");
       lines.push(isLatest ? chalk.white(line) : chalk.dim(line));
