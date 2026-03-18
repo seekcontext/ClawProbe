@@ -41,7 +41,7 @@ export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
   "mistral/mistral-small":           { input: 0.10,  output: 0.30  },
   // Moonshot (Kimi) — https://platform.moonshot.ai/docs/pricing
   "moonshot/kimi-k2":                { input: 0.40,  output: 2.00  },
-  "moonshot/kimi-k2.5":              { input: 0.45,  output: 2.20  },
+  "moonshot/kimi-k2.5":              { input: 0.60,  output: 2.00  },
   // Alibaba (Qwen) — https://help.aliyun.com/zh/model-studio/getting-started/models
   "qwen/qwen3-max":                  { input: 0.34,  output: 1.38  },
   "qwen/qwen3.5-plus":               { input: 0.11,  output: 0.66  },
@@ -251,11 +251,11 @@ export function getSessionCostFromJsonl(
     sessionKey,
     model,
     provider: stats.provider,
-    // inputTokens/outputTokens kept as cumulative session totals for display in --list
-    inputTokens: stats.totalInput,   // last turn's context size (most recent context)
-    outputTokens: stats.totalOutput, // cumulative output across all turns
+    // totalInput = Σ(input per turn) — matches API billing: each turn charges its full context
+    inputTokens: stats.totalInput,
+    outputTokens: stats.totalOutput,
     totalTokens: stats.totalInput + stats.totalOutput,
-    // contextTokens = actual context window occupancy right now (from last turn's totalTokens)
+    // contextTokens = current context window size (last turn's totalTokens, for display only)
     contextTokens: stats.lastTotalTokens,
     isOrphan: false,
     estimatedUsd: totalUsd,

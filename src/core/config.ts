@@ -203,7 +203,7 @@ export function initConfigTemplate(probeDir: string): boolean {
         "mistral/mistral-large":        { input: 0.50,  output: 1.50  },
         "mistral/mistral-small":        { input: 0.10,  output: 0.30  },
         "moonshot/kimi-k2":             { input: 0.40,  output: 2.00  },
-        "moonshot/kimi-k2.5":           { input: 0.45,  output: 2.20  },
+        "moonshot/kimi-k2.5":           { input: 0.60,  output: 2.00  },
         "qwen/qwen3-max":               { input: 0.34,  output: 1.38  },
         "qwen/qwen3.5-plus":            { input: 0.11,  output: 0.66  },
         "qwen/qwen3.5-flash":           { input: 0.065, output: 0.26  },

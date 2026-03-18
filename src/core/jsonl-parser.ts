@@ -308,13 +308,15 @@ export function parseSessionStats(filePath: string): SessionStats | null {
       } else {
         assistantTurns++;
         if (usage) {
-          // Accumulate only output tokens (input is cumulative/context each turn)
+          // Both input and output are billed each turn by the API provider.
+          // usage.input = full context size sent that turn (not incremental).
+          // usage.output = tokens generated that turn (incremental).
+          totalInput += usage.input ?? 0;
           totalOutput += usage.output ?? 0;
           totalCacheRead += usage.cacheRead ?? 0;
-          // The last turn's totalTokens = current context window usage
+          // Track the last turn's totalTokens for context window display
           if (usage.totalTokens > 0) {
             lastTotalTokens = usage.totalTokens;
-            totalInput = usage.input ?? 0; // most recent input = current context
           }
         }
         toolCallCount += toolCalls;
