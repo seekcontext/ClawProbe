@@ -283,10 +283,6 @@ export function parseSessionStats(filePath: string): SessionStats | null {
 
     const role = msg["role"] as string | undefined;
 
-    // Track model/provider from the most recent assistant message
-    if (msg["model"]) model = msg["model"] as string;
-    if (msg["provider"]) provider = msg["provider"] as string;
-
     if (role === "user") {
       userTurns++;
       continue;
@@ -296,6 +292,17 @@ export function parseSessionStats(filePath: string): SessionStats | null {
     if (role === "toolResult" || role === "tool") continue;
 
     if (role === "assistant") {
+      // Skip delivery-mirror entries — OpenClaw writes these as internal routing
+      // audit records when a response is cross-delivered to another channel.
+      // They are not real LLM turns and must not be counted for cost or turn stats.
+      const msgProvider = (msg["provider"] as string | undefined) ?? "";
+      const msgModel   = (msg["model"]    as string | undefined) ?? "";
+      if (msgProvider === "openclaw" || msgModel === "delivery-mirror") continue;
+
+      // Track model/provider from real assistant turns only (not delivery-mirror)
+      if (msgModel)    model    = msgModel;
+      if (msgProvider) provider = msgProvider;
+
       const usage = msg["usage"] as TokenUsage | undefined;
       const stopReason = (msg["stopReason"] as string | undefined) ?? "";
       const isError = stopReason === "error" || !!(msg["errorMessage"]);
