@@ -45,7 +45,11 @@ export function costBar(usd: number, maxUsd: number, width = 16): string {
 
 export function fmtUsd(usd: number): string {
   if (usd === 0) return chalk.gray("$0.00");
-  return chalk.green(`$${usd.toFixed(2)}`);
+  // Use enough decimal places so the value never rounds to zero
+  let decimals = 2;
+  if (usd < 0.01) decimals = 4;
+  if (usd < 0.0001) decimals = 6;
+  return chalk.green(`$${usd.toFixed(decimals)}`);
 }
 
 export function fmtTokens(n: number): string {
