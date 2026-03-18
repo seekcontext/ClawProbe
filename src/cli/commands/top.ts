@@ -7,7 +7,7 @@ import { getActiveSession, findJsonlPath } from "../../core/session-store.js";
 import { getLatestSnapshot } from "../../core/db.js";
 import { parseSessionStats } from "../../core/jsonl-parser.js";
 import { getPeriodCost, getSessionCostFromJsonl } from "../../engines/cost.js";
-import { runRules, persistSuggestions, type ProbeState } from "../../engines/rule-engine.js";
+import { runRules, type ProbeState } from "../../engines/rule-engine.js";
 import { fmtTokens, fmtUsd, fmtDate, tokenBar, severity, getWindowSize, LOCAL_TZ } from "../format.js";
 
 interface TopOptions {
@@ -120,8 +120,8 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
     bootstrapMaxChars: cfg.bootstrapMaxChars,
     config: cfg.probe,
   };
+  // Read-only: run rules but do NOT persist — top is a pure observer
   const suggestions = runRules(state);
-  persistSuggestions(db, agent, suggestions);
 
   // ── Row 1: title bar ───────────────────────────────────────────────────────
   const ts       = nowStr();
