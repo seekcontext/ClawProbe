@@ -10,22 +10,50 @@ import {
 import type { SessionEntry } from "../core/session-store.js";
 import type { SessionStats } from "../core/jsonl-parser.js";
 
-// USD per 1M tokens
+// USD per 1M tokens — prices as of March 2026
 export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
-  // Anthropic
+  // Anthropic — https://www.anthropic.com/pricing
   "anthropic/claude-opus-4":         { input: 15.00, output: 75.00 },
+  "anthropic/claude-opus-4.6":       { input: 5.00,  output: 25.00 },
   "anthropic/claude-sonnet-4.5":     { input: 3.00,  output: 15.00 },
+  "anthropic/claude-sonnet-4.6":     { input: 3.00,  output: 15.00 },
   "anthropic/claude-haiku-3.5":      { input: 0.80,  output: 4.00  },
-  // OpenAI
+  "anthropic/claude-haiku-4.5":      { input: 1.00,  output: 5.00  },
+  // OpenAI — https://platform.openai.com/docs/pricing
+  "openai/gpt-4o":                   { input: 2.50,  output: 10.00 },
+  "openai/gpt-4o-mini":              { input: 0.15,  output: 0.60  },
+  "openai/o3":                       { input: 2.00,  output: 8.00  },
   "openai/gpt-5.4":                  { input: 5.00,  output: 20.00 },
   "openai/gpt-5.4-mini":             { input: 0.30,  output: 1.20  },
   "openai/o4-mini":                  { input: 1.10,  output: 4.40  },
-  // Google
+  // Google — https://ai.google.dev/gemini-api/docs/pricing
+  "google/gemini-2.5-flash":         { input: 0.30,  output: 2.50  },
+  "google/gemini-2.5-pro":           { input: 1.25,  output: 10.00 },
   "google/gemini-3.1-flash":         { input: 0.075, output: 0.30  },
   "google/gemini-3.1-pro":           { input: 1.25,  output: 5.00  },
-  // DeepSeek
+  // DeepSeek — https://api-docs.deepseek.com/quick_start/pricing
   "deepseek/deepseek-v3":            { input: 0.27,  output: 1.10  },
+  "deepseek/deepseek-v3.2":          { input: 0.28,  output: 0.42  },
+  "deepseek/deepseek-r1":            { input: 0.55,  output: 2.19  },
   "deepseek/deepseek-r2":            { input: 0.55,  output: 2.19  },
+  // Mistral — https://mistral.ai/pricing/
+  "mistral/mistral-large":           { input: 0.50,  output: 1.50  },
+  "mistral/mistral-small":           { input: 0.10,  output: 0.30  },
+  // Moonshot (Kimi) — https://platform.moonshot.ai/docs/pricing
+  "moonshot/kimi-k2":                { input: 0.40,  output: 2.00  },
+  "moonshot/kimi-k2.5":              { input: 0.45,  output: 2.20  },
+  // Alibaba (Qwen) — https://help.aliyun.com/zh/model-studio/getting-started/models
+  "qwen/qwen3-max":                  { input: 0.34,  output: 1.38  },
+  "qwen/qwen3.5-plus":               { input: 0.11,  output: 0.66  },
+  "qwen/qwen3.5-flash":              { input: 0.065, output: 0.26  },
+  "qwen/qwen-long":                  { input: 0.069, output: 0.276 },
+  // Zhipu (GLM) — https://open.bigmodel.cn/pricing
+  "zhipu/glm-4":                     { input: 0.14,  output: 0.14  },
+  "zhipu/glm-4-plus":                { input: 0.69,  output: 0.69  },
+  "zhipu/glm-4-32b":                 { input: 0.10,  output: 0.10  },
+  // ByteDance (Doubao) — https://www.volcengine.com/product/ark/pricing
+  "bytedance/doubao-pro-32k":        { input: 0.11,  output: 0.11  },
+  "bytedance/doubao-1.5-pro-32k":    { input: 0.069, output: 0.069 },
 };
 
 export interface TokenCount {

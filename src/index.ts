@@ -4,7 +4,7 @@ import path from "path";
 import { fileURLToPath, URL } from "url";
 import fs, { readFileSync } from "fs";
 import { Command } from "commander";
-import { resolveConfig, assertOpenClawExists } from "./core/config.js";
+import { resolveConfig, assertOpenClawExists, initConfigTemplate } from "./core/config.js";
 import { startDaemon } from "./daemon.js";
 import { runStatus } from "./cli/commands/status.js";
 import { runCost } from "./cli/commands/cost.js";
@@ -58,6 +58,11 @@ program
 
     // Ensure probeDir exists before spawning daemon (daemon can't create it when stdio is ignored)
     fs.mkdirSync(cfg.probeDir, { recursive: true });
+
+    // Create a default config.json template on first run so users can discover all options
+    if (initConfigTemplate(cfg.probeDir)) {
+      console.log(`✓ Config template created: ${cfg.probeDir}/config.json`);
+    }
 
     // Spawn detached daemon and exit (nohup-style). Daemon writes its own logs to daemon.log.
     const entryPath = fileURLToPath(import.meta.url);
