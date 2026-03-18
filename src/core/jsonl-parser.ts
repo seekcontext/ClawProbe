@@ -107,8 +107,10 @@ export interface SessionStats {
   totalInput: number;
   /** Total output tokens across all turns (non-error) */
   totalOutput: number;
-  /** Total cache-read tokens */
+  /** Total cache-read tokens (served from prompt cache, billed at discounted rate) */
   totalCacheRead: number;
+  /** Total cache-write tokens (written to prompt cache, may be billed at premium) */
+  totalCacheWrite: number;
   /** Total tokens in last successful assistant turn (= current context usage) */
   lastTotalTokens: number;
   /** Number of user turns */
@@ -238,6 +240,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
   let totalInput = 0;
   let totalOutput = 0;
   let totalCacheRead = 0;
+  let totalCacheWrite = 0;
   let lastTotalTokens = 0;
   let userTurns = 0;
   let assistantTurns = 0;
@@ -314,6 +317,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
           totalInput += usage.input ?? 0;
           totalOutput += usage.output ?? 0;
           totalCacheRead += usage.cacheRead ?? 0;
+          totalCacheWrite += usage.cacheWrite ?? 0;
           // Track the last turn's totalTokens for context window display
           if (usage.totalTokens > 0) {
             lastTotalTokens = usage.totalTokens;
@@ -347,6 +351,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
     totalInput,
     totalOutput,
     totalCacheRead,
+    totalCacheWrite,
     lastTotalTokens,
     userTurns,
     assistantTurns,

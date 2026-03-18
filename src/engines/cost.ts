@@ -10,38 +10,61 @@ import {
 import type { SessionEntry } from "../core/session-store.js";
 import type { SessionStats } from "../core/jsonl-parser.js";
 
+export interface ModelPrice {
+  /** Normal input token price (USD / 1M tokens) */
+  input: number;
+  /** Output token price (USD / 1M tokens) */
+  output: number;
+  /**
+   * Cache-read multiplier relative to input price (default 0.1 = 10% of input).
+   * Set to 0 if the provider does not charge for cache reads.
+   */
+  cacheReadMultiplier?: number;
+  /**
+   * Cache-write multiplier relative to input price (default 1.0 = same as input).
+   * Some providers charge extra for writing to the prompt cache (e.g. Anthropic 1.25x).
+   * Set to 0 if the provider does not charge for cache writes.
+   */
+  cacheWriteMultiplier?: number;
+}
+
 // USD per 1M tokens — prices as of March 2026
-export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
+export const MODEL_PRICES: Record<string, ModelPrice> = {
   // Anthropic — https://www.anthropic.com/pricing
-  "anthropic/claude-opus-4":         { input: 15.00, output: 75.00 },
-  "anthropic/claude-opus-4.6":       { input: 5.00,  output: 25.00 },
-  "anthropic/claude-sonnet-4.5":     { input: 3.00,  output: 15.00 },
-  "anthropic/claude-sonnet-4.6":     { input: 3.00,  output: 15.00 },
-  "anthropic/claude-haiku-3.5":      { input: 0.80,  output: 4.00  },
-  "anthropic/claude-haiku-4.5":      { input: 1.00,  output: 5.00  },
+  // cache write: 1.25x input; cache read: 0.1x input
+  "anthropic/claude-opus-4":         { input: 15.00, output: 75.00, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1 },
+  "anthropic/claude-opus-4.6":       { input: 5.00,  output: 25.00, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1 },
+  "anthropic/claude-sonnet-4.5":     { input: 3.00,  output: 15.00, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1 },
+  "anthropic/claude-sonnet-4.6":     { input: 3.00,  output: 15.00, cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1 },
+  "anthropic/claude-haiku-3.5":      { input: 0.80,  output: 4.00,  cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1 },
+  "anthropic/claude-haiku-4.5":      { input: 1.00,  output: 5.00,  cacheWriteMultiplier: 1.25, cacheReadMultiplier: 0.1 },
   // OpenAI — https://platform.openai.com/docs/pricing
-  "openai/gpt-4o":                   { input: 2.50,  output: 10.00 },
-  "openai/gpt-4o-mini":              { input: 0.15,  output: 0.60  },
-  "openai/o3":                       { input: 2.00,  output: 8.00  },
-  "openai/gpt-5.4":                  { input: 5.00,  output: 20.00 },
-  "openai/gpt-5.4-mini":             { input: 0.30,  output: 1.20  },
-  "openai/o4-mini":                  { input: 1.10,  output: 4.40  },
+  // cache read: 0.5x input; no explicit cache write charge
+  "openai/gpt-4o":                   { input: 2.50,  output: 10.00, cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 },
+  "openai/gpt-4o-mini":              { input: 0.15,  output: 0.60,  cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 },
+  "openai/o3":                       { input: 2.00,  output: 8.00,  cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 },
+  "openai/gpt-5.4":                  { input: 5.00,  output: 20.00, cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 },
+  "openai/gpt-5.4-mini":             { input: 0.30,  output: 1.20,  cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 },
+  "openai/o4-mini":                  { input: 1.10,  output: 4.40,  cacheReadMultiplier: 0.5, cacheWriteMultiplier: 0 },
   // Google — https://ai.google.dev/gemini-api/docs/pricing
-  "google/gemini-2.5-flash":         { input: 0.30,  output: 2.50  },
-  "google/gemini-2.5-pro":           { input: 1.25,  output: 10.00 },
-  "google/gemini-3.1-flash":         { input: 0.075, output: 0.30  },
-  "google/gemini-3.1-pro":           { input: 1.25,  output: 5.00  },
+  // cache read: 0.25x input; cache write: 1x input (storage billed separately, not modeled here)
+  "google/gemini-2.5-flash":         { input: 0.30,  output: 2.50,  cacheReadMultiplier: 0.25, cacheWriteMultiplier: 1.0 },
+  "google/gemini-2.5-pro":           { input: 1.25,  output: 10.00, cacheReadMultiplier: 0.25, cacheWriteMultiplier: 1.0 },
+  "google/gemini-3.1-flash":         { input: 0.075, output: 0.30,  cacheReadMultiplier: 0.25, cacheWriteMultiplier: 1.0 },
+  "google/gemini-3.1-pro":           { input: 1.25,  output: 5.00,  cacheReadMultiplier: 0.25, cacheWriteMultiplier: 1.0 },
   // DeepSeek — https://api-docs.deepseek.com/quick_start/pricing
-  "deepseek/deepseek-v3":            { input: 0.27,  output: 1.10  },
-  "deepseek/deepseek-v3.2":          { input: 0.28,  output: 0.42  },
-  "deepseek/deepseek-r1":            { input: 0.55,  output: 2.19  },
-  "deepseek/deepseek-r2":            { input: 0.55,  output: 2.19  },
-  // Mistral — https://mistral.ai/pricing/
+  // cache read (disk): 0.1x; cache read (memory): ~0.018x; using disk rate as conservative estimate
+  "deepseek/deepseek-v3":            { input: 0.27,  output: 1.10,  cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 },
+  "deepseek/deepseek-v3.2":          { input: 0.28,  output: 0.42,  cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 },
+  "deepseek/deepseek-r1":            { input: 0.55,  output: 2.19,  cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 },
+  "deepseek/deepseek-r2":            { input: 0.55,  output: 2.19,  cacheReadMultiplier: 0.1, cacheWriteMultiplier: 0 },
+  // Mistral — https://mistral.ai/pricing/ (no prompt caching documented)
   "mistral/mistral-large":           { input: 0.50,  output: 1.50  },
   "mistral/mistral-small":           { input: 0.10,  output: 0.30  },
   // Moonshot (Kimi) — https://platform.moonshot.ai/docs/pricing
-  "moonshot/kimi-k2":                { input: 0.40,  output: 2.00  },
-  "moonshot/kimi-k2.5":              { input: 0.60,  output: 2.00  },
+  // cache read: ~1/6 of input price (¥1/M vs ¥6/M for kimi-k2.5)
+  "moonshot/kimi-k2":                { input: 0.40,  output: 2.00,  cacheReadMultiplier: 0.167, cacheWriteMultiplier: 0 },
+  "moonshot/kimi-k2.5":              { input: 0.60,  output: 2.00,  cacheReadMultiplier: 0.167, cacheWriteMultiplier: 0 },
   // Alibaba (Qwen) — https://help.aliyun.com/zh/model-studio/getting-started/models
   "qwen/qwen3-max":                  { input: 0.34,  output: 1.38  },
   "qwen/qwen3.5-plus":               { input: 0.11,  output: 0.66  },
@@ -59,6 +82,10 @@ export const MODEL_PRICES: Record<string, { input: number; output: number }> = {
 export interface TokenCount {
   input: number;
   output: number;
+  /** Tokens served from prompt cache (billed at a discounted rate) */
+  cacheRead?: number;
+  /** Tokens written to prompt cache (may be billed at a premium rate) */
+  cacheWrite?: number;
 }
 
 export interface DailyCost {
@@ -117,21 +144,31 @@ export interface TurnCost {
 export function estimateCost(
   tokens: TokenCount,
   model: string | null,
-  customPrices: Record<string, { input: number; output: number }> = {}
+  customPrices: Record<string, ModelPrice> = {}
 ): number {
   if (!model) return 0;
 
   const prices = { ...MODEL_PRICES, ...customPrices };
 
-  // Try exact match first, then prefix-match (e.g. "claude-sonnet" → anthropic/claude-sonnet-*)
+  // Try exact match first, then substring-match on the model slug after "/"
   const price =
     prices[model] ??
     Object.entries(prices).find(([key]) => model.includes(key.split("/")[1] ?? key))?.[1];
 
   if (!price) return 0;
 
-  return (tokens.input / 1_000_000) * price.input +
-         (tokens.output / 1_000_000) * price.output;
+  // Non-cached input = input minus any tokens already covered by cacheRead/cacheWrite
+  const cacheRead  = tokens.cacheRead  ?? 0;
+  const cacheWrite = tokens.cacheWrite ?? 0;
+  const normalInput = Math.max(0, tokens.input - cacheRead - cacheWrite);
+
+  const cacheReadRate  = price.cacheReadMultiplier  ?? 0;
+  const cacheWriteRate = price.cacheWriteMultiplier ?? 0;
+
+  return (normalInput  / 1_000_000) * price.input +
+         (tokens.output / 1_000_000) * price.output +
+         (cacheRead     / 1_000_000) * price.input * cacheReadRate +
+         (cacheWrite    / 1_000_000) * price.input * cacheWriteRate;
 }
 
 export function getSessionCost(
@@ -233,14 +270,24 @@ export function getSessionCostFromJsonl(
 ): SessionCost {
   const model = stats.model;
 
-  // Each turn's inputTokensDelta = that turn's usage.input (= cumulative context at that point).
+  // Each turn's inputTokensDelta = that turn's usage.input (= full context sent that turn).
   // Each turn's outputTokensDelta = that turn's usage.output (incremental output).
+  // Cache tokens are passed through so estimateCost can apply the correct discounted rate.
   const turns: TurnCost[] = stats.turns.map((t) => ({
     turnIndex: t.turnIndex,
     timestamp: t.timestamp,
-    inputTokensDelta: t.usage.input,   // context size at this turn
-    outputTokensDelta: t.usage.output, // incremental output tokens
-    estimatedUsd: estimateCost({ input: t.usage.input, output: t.usage.output }, model, customPrices),
+    inputTokensDelta: t.usage.input,
+    outputTokensDelta: t.usage.output,
+    estimatedUsd: estimateCost(
+      {
+        input: t.usage.input,
+        output: t.usage.output,
+        cacheRead: t.usage.cacheRead,
+        cacheWrite: t.usage.cacheWrite,
+      },
+      model,
+      customPrices
+    ),
     compactOccurred: false,
   }));
 
