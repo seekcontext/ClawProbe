@@ -247,7 +247,8 @@ function stripAnsi(s: string): string {
 }
 
 /**
- * Compute column widths from header + rows. Use minWidths to enforce minimums.
+ * Compute table column widths from header + rows.
+ * Widths include the default left/right cell padding used by cli-table3.
  * Handles chalk-colored strings by stripping ANSI codes before measuring.
  */
 export function computeColWidths(
@@ -255,15 +256,16 @@ export function computeColWidths(
   rows: string[][],
   minWidths?: number[]
 ): number[] {
-  const widths = head.map((h) => stripAnsi(h).length);
+  const cellPadding = 2;
+  const widths = head.map((h) => stripAnsi(h).length + cellPadding);
   for (const row of rows) {
     for (let i = 0; i < row.length; i++) {
-      widths[i] = Math.max(widths[i] ?? 0, stripAnsi(String(row[i])).length);
+      widths[i] = Math.max(widths[i] ?? 0, stripAnsi(String(row[i])).length + cellPadding);
     }
   }
   if (minWidths) {
     for (let i = 0; i < widths.length; i++) {
-      widths[i] = Math.max(widths[i], minWidths[i] ?? 0);
+      widths[i] = Math.max(widths[i], (minWidths[i] ?? 0) + cellPadding);
     }
   }
   return widths;
