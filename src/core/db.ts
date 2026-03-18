@@ -1,8 +1,10 @@
-import { DatabaseSync, StatementSync } from "node:sqlite";
+import { DatabaseSync } from "node:sqlite";
 import fs from "fs";
 import path from "path";
 
-// node:sqlite uses DatabaseSync (synchronous API, similar to better-sqlite3)
+// ---------------------------------------------------------------------------
+// Row interfaces
+// ---------------------------------------------------------------------------
 
 export interface SessionSnapshotRow {
   id: number;
@@ -19,16 +21,39 @@ export interface SessionSnapshotRow {
   sampled_at: number;
 }
 
-export interface CostRecordRow {
+/**
+ * One row per assistant turn, keyed by (agent, session_key, turn_index).
+ * Stores the raw token breakdown reported by the model so that cost can be
+ * recomputed accurately at any time with the current price table.
+ *
+ * Billing semantics (matches provider invoices):
+ *   cost = (input - cache_read - cache_write) * input_price
+ *        + output * output_price
+ *        + cache_read  * input_price * cacheReadMultiplier
+ *        + cache_write * input_price * cacheWriteMultiplier
+ */
+export interface TurnRecordRow {
   id: number;
   agent: string;
   session_key: string;
+  /** YYYY-MM-DD of the turn, in local timezone */
   date: string;
-  input_tokens: number;
-  output_tokens: number;
+  /** 1-based index within the session */
+  turn_index: number;
+  /** Unix seconds */
+  sampled_at: number;
   model: string | null;
+  provider: string | null;
+  /** Full context tokens sent this turn (billed as input by provider) */
+  input_tokens: number;
+  /** Tokens generated this turn */
+  output_tokens: number;
+  /** Tokens served from prompt cache (billed at discounted rate) */
+  cache_read: number;
+  /** Tokens written to prompt cache */
+  cache_write: number;
+  /** Pre-computed USD cost for this turn, stored for fast aggregation */
   estimated_usd: number;
-  recorded_at: number;
 }
 
 export interface CompactEventRow {
@@ -66,6 +91,10 @@ export interface SuggestionRow {
   dismissed: number;
 }
 
+// ---------------------------------------------------------------------------
+// Schema  (v0.5 — replaces cost_records with turn_records)
+// ---------------------------------------------------------------------------
+
 const SCHEMA = `
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
@@ -85,22 +114,32 @@ CREATE TABLE IF NOT EXISTS session_snapshots (
   sampled_at       INTEGER NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_ss_agent_session ON session_snapshots(agent, session_key, sampled_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ss_agent_session
+  ON session_snapshots(agent, session_key, sampled_at);
 
-CREATE TABLE IF NOT EXISTS cost_records (
+-- Per-turn token records — the single source of truth for cost.
+-- Replacing the old cost_records table which discarded cache token info.
+CREATE TABLE IF NOT EXISTS turn_records (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   agent         TEXT    NOT NULL,
   session_key   TEXT    NOT NULL,
   date          TEXT    NOT NULL,
+  turn_index    INTEGER NOT NULL,
+  sampled_at    INTEGER NOT NULL,
+  model         TEXT,
+  provider      TEXT,
   input_tokens  INTEGER NOT NULL DEFAULT 0,
   output_tokens INTEGER NOT NULL DEFAULT 0,
-  model         TEXT,
-  estimated_usd REAL    NOT NULL DEFAULT 0,
-  recorded_at   INTEGER NOT NULL
+  cache_read    INTEGER NOT NULL DEFAULT 0,
+  cache_write   INTEGER NOT NULL DEFAULT 0,
+  estimated_usd REAL    NOT NULL DEFAULT 0
 );
 
-CREATE INDEX IF NOT EXISTS idx_cr_agent_date ON cost_records(agent, date);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tr_agent_session_turn
+  ON turn_records(agent, session_key, turn_index);
 
+CREATE INDEX IF NOT EXISTS idx_tr_agent_date
+  ON turn_records(agent, date);
 
 CREATE TABLE IF NOT EXISTS compact_events (
   id                      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,7 +166,8 @@ CREATE TABLE IF NOT EXISTS file_snapshots (
   sampled_at     INTEGER NOT NULL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_fs_agent_path ON file_snapshots(agent, file_path, sampled_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fs_agent_path
+  ON file_snapshots(agent, file_path, sampled_at);
 
 CREATE TABLE IF NOT EXISTS suggestions (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -144,6 +184,10 @@ CREATE TABLE IF NOT EXISTS suggestions (
 CREATE INDEX IF NOT EXISTS idx_sg_agent_rule ON suggestions(agent, rule_id, dismissed);
 `;
 
+// ---------------------------------------------------------------------------
+// DB lifecycle
+// ---------------------------------------------------------------------------
+
 let _db: DatabaseSync | null = null;
 
 export function openDb(probeDir: string): DatabaseSync {
@@ -153,33 +197,20 @@ export function openDb(probeDir: string): DatabaseSync {
   const dbPath = path.join(probeDir, "probe.db");
   _db = new DatabaseSync(dbPath);
   _db.exec(SCHEMA);
-  migrateDb(_db);
   return _db;
 }
 
 /**
- * Run lightweight migrations for schema changes that can't be done with
- * CREATE TABLE IF NOT EXISTS (e.g. deduplicating existing rows before
- * adding a UNIQUE index, or adding columns to existing tables).
+ * Delete the probe.db file and reset the in-memory handle.
+ * The next call to openDb() will recreate a fresh database.
  */
-function migrateDb(db: DatabaseSync): void {
-  // v0.2.11: deduplicate cost_records before adding unique index
-  try {
-    // Remove duplicate rows, keeping only the one with the highest output_tokens per (agent, session_key, date)
-    db.exec(`
-      DELETE FROM cost_records
-      WHERE id NOT IN (
-        SELECT MAX(id) FROM cost_records
-        GROUP BY agent, session_key, date
-      )
-    `);
-    db.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_cr_unique
-      ON cost_records(agent, session_key, date)
-    `);
-  } catch {
-    // If migration fails, the SELECT+UPDATE fallback in upsertCostRecord still works
+export function dropAndResetDb(probeDir: string): void {
+  if (_db) {
+    _db.close();
+    _db = null;
   }
+  const dbPath = path.join(probeDir, "probe.db");
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath);
 }
 
 export function getDb(): DatabaseSync {
@@ -194,15 +225,14 @@ export function resetDb(): void {
   }
 }
 
-// --- Session Snapshots ---
+// ---------------------------------------------------------------------------
+// Session Snapshots
+// ---------------------------------------------------------------------------
 
 export function insertSessionSnapshot(
   db: DatabaseSync,
   row: Omit<SessionSnapshotRow, "id">
 ): void {
-  // INSERT OR REPLACE deduplicates same (agent, session_key, sampled_at) so that
-  // if the daemon triggers twice in the same second we don't create duplicate rows
-  // that would cause token deltas to be counted twice in recordDailyCost.
   db.prepare(`
     INSERT INTO session_snapshots
       (agent, session_key, session_id, model, provider,
@@ -277,90 +307,86 @@ export function getAllSessionKeys(
   `).all(agent) as unknown as { session_key: string; last_sampled_at: number }[];
 }
 
-// --- Cost Records ---
+// ---------------------------------------------------------------------------
+// Turn Records  (replaces cost_records)
+// ---------------------------------------------------------------------------
 
-export function upsertCostRecord(
+export function upsertTurnRecord(
   db: DatabaseSync,
-  row: Omit<CostRecordRow, "id">
+  row: Omit<TurnRecordRow, "id">
 ): void {
-  // Use SELECT + UPDATE/INSERT to avoid relying on UNIQUE constraint
-  // (which may not exist on older DBs created before v0.2.11).
-  // We store the cumulative daily total per session, updating when the
-  // new value is larger (so repeated scans don't double-count).
-  const existing = db.prepare(`
-    SELECT id, input_tokens, output_tokens, estimated_usd
-    FROM cost_records
-    WHERE agent = ? AND session_key = ? AND date = ?
-    ORDER BY id DESC LIMIT 1
-  `).get(row.agent, row.session_key, row.date) as
-    { id: number; input_tokens: number; output_tokens: number; estimated_usd: number } | undefined;
-
-  if (existing) {
-    // Only update if the new value is larger (cumulative total grew)
-    if (row.output_tokens > existing.output_tokens) {
-      db.prepare(`
-        UPDATE cost_records
-        SET input_tokens = ?, output_tokens = ?, model = ?, estimated_usd = ?, recorded_at = ?
-        WHERE id = ?
-      `).run(
-        row.input_tokens, row.output_tokens,
-        row.model, row.estimated_usd, row.recorded_at,
-        existing.id
-      );
-    }
-  } else {
-    db.prepare(`
-      INSERT INTO cost_records
-        (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      row.agent, row.session_key, row.date,
-      row.input_tokens, row.output_tokens, row.model,
-      row.estimated_usd, row.recorded_at
-    );
-  }
-}
-
-export function getDailyCostSummary(
-  db: DatabaseSync,
-  agent: string,
-  days: number
-): { date: string; total_usd: number; input_tokens: number; output_tokens: number }[] {
-  const cutoff = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
-  return db.prepare(`
-    SELECT
-      date,
-      SUM(estimated_usd)  AS total_usd,
-      SUM(input_tokens)   AS input_tokens,
-      SUM(output_tokens)  AS output_tokens
-    FROM cost_records
-    WHERE agent = ? AND date >= ?
-    GROUP BY date
-    ORDER BY date ASC
-  `).all(agent, cutoff) as unknown as { date: string; total_usd: number; input_tokens: number; output_tokens: number }[];
+  db.prepare(`
+    INSERT INTO turn_records
+      (agent, session_key, date, turn_index, sampled_at, model, provider,
+       input_tokens, output_tokens, cache_read, cache_write, estimated_usd)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(agent, session_key, turn_index) DO UPDATE SET
+      date          = excluded.date,
+      sampled_at    = excluded.sampled_at,
+      model         = excluded.model,
+      provider      = excluded.provider,
+      input_tokens  = excluded.input_tokens,
+      output_tokens = excluded.output_tokens,
+      cache_read    = excluded.cache_read,
+      cache_write   = excluded.cache_write,
+      estimated_usd = excluded.estimated_usd
+  `).run(
+    row.agent, row.session_key, row.date, row.turn_index, row.sampled_at,
+    row.model, row.provider,
+    row.input_tokens, row.output_tokens, row.cache_read, row.cache_write,
+    row.estimated_usd
+  );
 }
 
 /**
- * Returns the raw per-session cost rows for a date range, including model name.
- * Used by getPeriodCost to recompute USD from live price table rather than
- * relying on the stored estimated_usd (which may have been recorded before
- * prices were available).
+ * Return per-date aggregated token counts for the cost summary view.
+ * estimated_usd is the stored value; callers may recompute from token columns.
  */
-export function getDailyCostRows(
+export function getTurnSummaryByDate(
   db: DatabaseSync,
   agent: string,
   days: number
-): { date: string; session_key: string; model: string | null; input_tokens: number; output_tokens: number; estimated_usd: number }[] {
+): { date: string; input_tokens: number; output_tokens: number; cache_read: number; cache_write: number; model: string | null; estimated_usd: number }[] {
   const cutoff = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  // Group by date + model so the caller can apply the correct per-model price.
+  // Use MAX(model) as a tiebreaker when a session switches models within a day.
   return db.prepare(`
-    SELECT date, session_key, model, input_tokens, output_tokens, estimated_usd
-    FROM cost_records
+    SELECT
+      date,
+      SUM(input_tokens)  AS input_tokens,
+      SUM(output_tokens) AS output_tokens,
+      SUM(cache_read)    AS cache_read,
+      SUM(cache_write)   AS cache_write,
+      model,
+      SUM(estimated_usd) AS estimated_usd
+    FROM turn_records
     WHERE agent = ? AND date >= ?
+    GROUP BY date, model
     ORDER BY date ASC
-  `).all(agent, cutoff) as unknown as { date: string; session_key: string; model: string | null; input_tokens: number; output_tokens: number; estimated_usd: number }[];
+  `).all(agent, cutoff) as unknown as { date: string; input_tokens: number; output_tokens: number; cache_read: number; cache_write: number; model: string | null; estimated_usd: number }[];
 }
 
-// --- Compact Events ---
+/**
+ * Return raw per-turn rows for a date range.
+ * Used by getPeriodCost to recompute USD with the live price table.
+ */
+export function getTurnRows(
+  db: DatabaseSync,
+  agent: string,
+  days: number
+): TurnRecordRow[] {
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  return db.prepare(`
+    SELECT *
+    FROM turn_records
+    WHERE agent = ? AND date >= ?
+    ORDER BY date ASC, sampled_at ASC
+  `).all(agent, cutoff) as unknown as TurnRecordRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Compact Events
+// ---------------------------------------------------------------------------
 
 export function upsertCompactEvent(
   db: DatabaseSync,
@@ -408,14 +434,14 @@ export function getCompactEventById(
   return db.prepare(`SELECT * FROM compact_events WHERE id = ?`).get(id) as unknown as CompactEventRow | undefined;
 }
 
-// --- File Snapshots ---
+// ---------------------------------------------------------------------------
+// File Snapshots
+// ---------------------------------------------------------------------------
 
 export function insertFileSnapshot(
   db: DatabaseSync,
   row: Omit<FileSnapshotRow, "id">
 ): void {
-  // ON CONFLICT deduplicates same (agent, file_path, sampled_at) so repeated
-  // snapshots within the same second don't produce phantom rows in context output.
   db.prepare(`
     INSERT INTO file_snapshots
       (agent, file_path, raw_chars, injected_chars, was_truncated, sampled_at)
@@ -434,8 +460,6 @@ export function getLatestFileSnapshots(
   db: DatabaseSync,
   agent: string
 ): FileSnapshotRow[] {
-  // UNIQUE index on (agent, file_path, sampled_at) guarantees at most one row per
-  // (file, second), so the simple MAX(sampled_at) join is always duplicate-free.
   return db.prepare(`
     SELECT fs.*
     FROM file_snapshots fs
@@ -450,7 +474,9 @@ export function getLatestFileSnapshots(
   `).all(agent, agent) as unknown as FileSnapshotRow[];
 }
 
-// --- Suggestions ---
+// ---------------------------------------------------------------------------
+// Suggestions
+// ---------------------------------------------------------------------------
 
 export function upsertSuggestion(
   db: DatabaseSync,

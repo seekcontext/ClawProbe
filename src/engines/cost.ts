@@ -1,11 +1,11 @@
 import { DatabaseSync } from "node:sqlite";
 import {
-  getDailyCostRows,
+  getTurnRows,
+  upsertTurnRecord,
   getAllSessionKeys,
   getFirstSnapshot,
   getLatestSnapshot,
   getAllSnapshots,
-  upsertCostRecord,
 } from "../core/db.js";
 import type { SessionEntry } from "../core/session-store.js";
 import type { SessionStats } from "../core/jsonl-parser.js";
@@ -318,7 +318,7 @@ export function getSessionCostFromJsonl(
 export function getAllSessionCosts(
   db: DatabaseSync,
   agent: string,
-  customPrices: Record<string, { input: number; output: number }> = {}
+  customPrices: Record<string, ModelPrice> = {}
 ): SessionCost[] {
   const keys = getAllSessionKeys(db, agent);
   return keys
@@ -326,11 +326,53 @@ export function getAllSessionCosts(
     .filter((s): s is SessionCost => s !== null);
 }
 
+/**
+ * Write every turn of a session into turn_records.
+ * Called by the daemon each time a jsonl file is scanned.
+ */
+export function recordSessionTurns(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string,
+  stats: SessionStats,
+  customPrices: Record<string, ModelPrice> = {}
+): void {
+  for (const turn of stats.turns) {
+    const turnDate = turn.timestamp > 0
+      ? new Date(turn.timestamp * 1000).toISOString().slice(0, 10)
+      : todayString();
+    const usd = estimateCost(
+      {
+        input: turn.usage.input,
+        output: turn.usage.output,
+        cacheRead: turn.usage.cacheRead,
+        cacheWrite: turn.usage.cacheWrite,
+      },
+      turn.model ?? stats.model,
+      customPrices
+    );
+    upsertTurnRecord(db, {
+      agent,
+      session_key: sessionKey,
+      date: turnDate,
+      turn_index: turn.turnIndex,
+      sampled_at: turn.timestamp > 0 ? turn.timestamp : Math.floor(Date.now() / 1000),
+      model: turn.model ?? stats.model,
+      provider: turn.provider ?? stats.provider,
+      input_tokens: turn.usage.input,
+      output_tokens: turn.usage.output,
+      cache_read: turn.usage.cacheRead,
+      cache_write: turn.usage.cacheWrite,
+      estimated_usd: usd,
+    });
+  }
+}
+
 export function getPeriodCost(
   db: DatabaseSync,
   agent: string,
   period: "day" | "week" | "month" | "all",
-  customPrices: Record<string, { input: number; output: number }> = {}
+  customPrices: Record<string, ModelPrice> = {}
 ): PeriodCostSummary {
   const now = new Date();
   const today = formatDate(now);
@@ -362,32 +404,37 @@ export function getPeriodCost(
       break;
   }
 
-  // Use per-row data to recompute USD from the live price table.
-  // This ensures historical records stored with estimated_usd=0 (recorded before
-  // model prices were available) are displayed correctly without a DB migration.
-  const rawRows = getDailyCostRows(db, agent, days);
-  const prices = { ...MODEL_PRICES, ...customPrices };
+  // Read raw per-turn rows and recompute cost using the live price table.
+  // Because we now store cache_read/cache_write per turn, the recomputed
+  // value accurately reflects provider billing (including cache discounts).
+  const rows = getTurnRows(db, agent, days);
 
-  const byDate = new Map<string, { usd: number; input: number; output: number; unpriced: string[] }>();
-  for (const row of rawRows) {
+  const byDate = new Map<string, {
+    usd: number; input: number; output: number;
+    cacheRead: number; cacheWrite: number; unpriced: string[];
+  }>();
+
+  for (const row of rows) {
     let entry = byDate.get(row.date);
     if (!entry) {
-      entry = { usd: 0, input: 0, output: 0, unpriced: [] };
+      entry = { usd: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, unpriced: [] };
       byDate.set(row.date, entry);
     }
-    entry.input += row.input_tokens;
-    entry.output += row.output_tokens;
+    entry.input     += row.input_tokens;
+    entry.output    += row.output_tokens;
+    entry.cacheRead += row.cache_read;
+    entry.cacheWrite+= row.cache_write;
 
     if (row.model) {
       const recomputed = estimateCost(
-        { input: row.input_tokens, output: row.output_tokens },
+        { input: row.input_tokens, output: row.output_tokens,
+          cacheRead: row.cache_read, cacheWrite: row.cache_write },
         row.model,
         customPrices
       );
       if (recomputed > 0) {
         entry.usd += recomputed;
       } else {
-        // Price not found for this model — fall back to stored value
         entry.usd += row.estimated_usd;
         if (!entry.unpriced.includes(row.model)) entry.unpriced.push(row.model);
       }
@@ -396,7 +443,6 @@ export function getPeriodCost(
     }
   }
 
-  // Collect models with no price match for display hints
   const unpricedModels = new Set<string>();
   for (const entry of byDate.values()) {
     entry.unpriced.forEach((m) => unpricedModels.add(m));
@@ -409,14 +455,11 @@ export function getPeriodCost(
     outputTokens: entry.output,
   })).sort((a, b) => a.date.localeCompare(b.date));
 
-  // Suppress unused-variable warning — prices is used inside estimateCost call above
-  void prices;
-
-  const totalUsd = daily.reduce((s, d) => s + d.usd, 0);
-  const totalInput = daily.reduce((s, d) => s + d.inputTokens, 0);
+  const totalUsd    = daily.reduce((s, d) => s + d.usd, 0);
+  const totalInput  = daily.reduce((s, d) => s + d.inputTokens, 0);
   const totalOutput = daily.reduce((s, d) => s + d.outputTokens, 0);
-  const activeDays = Math.max(daily.length, 1);
-  const dailyAvg = totalUsd / activeDays;
+  const activeDays  = Math.max(daily.length, 1);
+  const dailyAvg    = totalUsd / activeDays;
 
   return {
     period: periodLabel,
@@ -430,29 +473,6 @@ export function getPeriodCost(
     daily,
     unpricedModels: unpricedModels.size > 0 ? [...unpricedModels] : undefined,
   };
-}
-
-export function recordDailyCost(
-  db: DatabaseSync,
-  agent: string,
-  sessionKey: string,
-  date: string,
-  inputDelta: number,
-  outputDelta: number,
-  model: string | null,
-  customPrices: Record<string, { input: number; output: number }> = {}
-): void {
-  const usd = estimateCost({ input: inputDelta, output: outputDelta }, model, customPrices);
-  upsertCostRecord(db, {
-    agent,
-    session_key: sessionKey,
-    date,
-    input_tokens: inputDelta,
-    output_tokens: outputDelta,
-    model,
-    estimated_usd: usd,
-    recorded_at: Math.floor(Date.now() / 1000),
-  });
 }
 
 export function formatDate(d: Date): string {

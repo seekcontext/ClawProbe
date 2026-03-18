@@ -5,6 +5,7 @@ import { fileURLToPath, URL } from "url";
 import fs, { readFileSync } from "fs";
 import { Command } from "commander";
 import { resolveConfig, assertOpenClawExists, initConfigTemplate } from "./core/config.js";
+import { dropAndResetDb } from "./core/db.js";
 import { startDaemon } from "./daemon.js";
 import { runStatus } from "./cli/commands/status.js";
 import { runCost } from "./cli/commands/cost.js";
@@ -78,6 +79,37 @@ program
     console.log(`✓ Watching: ${cfg.openclawDir}`);
     console.log(`✓ Logs: ${daemonLogPath}`);
     process.exit(0);
+  });
+
+// --- reset-db ---
+program
+  .command("reset-db")
+  .description("Delete and recreate probe.db (re-indexes all data from .jsonl files on next start)")
+  .option("--yes", "Skip confirmation prompt")
+  .action(async (opts: { yes?: boolean }) => {
+    const cfg = resolveConfig();
+    const dbPath = `${cfg.probeDir}/probe.db`;
+
+    if (!opts.yes) {
+      const readline = await import("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      await new Promise<void>((resolve) => {
+        rl.question(
+          `This will delete ${dbPath} and re-index from .jsonl transcripts on next start.\nContinue? [y/N] `,
+          (answer) => {
+            rl.close();
+            if (answer.toLowerCase() !== "y") {
+              console.log("Aborted.");
+              process.exit(0);
+            }
+            resolve();
+          }
+        );
+      });
+    }
+
+    dropAndResetDb(cfg.probeDir);
+    console.log(`✓ probe.db deleted. Run \`clawprobe start\` to rebuild from .jsonl transcripts.`);
   });
 
 // --- stop ---

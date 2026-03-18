@@ -3,12 +3,12 @@ import path from "path";
 import { ResolvedConfig } from "./core/config.js";
 import { openDb, insertSessionSnapshot, upsertCompactEvent } from "./core/db.js";
 import { FileWatcher, buildWatchGlobs, FileChange } from "./core/watcher.js";
-import { readSessionsStore, listJsonlFiles, findJsonlPath } from "./core/session-store.js";
+import { readSessionsStore, listJsonlFiles, findJsonlPath, clearJsonlCache } from "./core/session-store.js";
 import { parseIncremental, parseAll, parseSessionStats } from "./core/jsonl-parser.js";
 import { analyzeCompaction } from "./engines/compact-diff.js";
 import { snapshotWorkspaceFiles } from "./engines/file-analyzer.js";
 import { runRules, persistSuggestions, ProbeState } from "./engines/rule-engine.js";
-import { recordDailyCost, estimateCost, todayString } from "./engines/cost.js";
+import { recordSessionTurns } from "./engines/cost.js";
 
 let watcher: FileWatcher | null = null;
 
@@ -54,7 +54,7 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
     console.error(`[daemon] Token snapshots will not be written until this directory is created.`);
   }
 
-  // Initial scan of all existing .jsonl files
+  // Initial scan of all existing .jsonl files (writes turn_records for cost)
   const jsonlFiles = listJsonlFiles(cfg.sessionsDir);
   console.log(`[daemon] Found ${jsonlFiles.length} .jsonl transcript(s) to scan`);
   for (const jsonlPath of jsonlFiles) {
@@ -64,8 +64,10 @@ export async function startDaemon(cfg: ResolvedConfig): Promise<void> {
       console.error(`[daemon] Error scanning ${jsonlPath}:`, err);
     }
   }
+  // Clear uuid→path cache after initial scan so watcher picks up new files correctly
+  clearJsonlCache();
 
-  // Initial snapshot of sessions.json
+  // Snapshot sessions.json for status/context display (not cost)
   try {
     const sessionCount = await processSessionsJson(cfg, agent);
     console.log(`[daemon] Snapshotted ${sessionCount} session(s) from sessions.json`);
@@ -141,9 +143,9 @@ async function processSessionsJson(
   const db = openDb(cfg.probeDir);
   const sessions = readSessionsStore(cfg.sessionsDir);
   const now = Math.floor(Date.now() / 1000);
-  const today = todayString();
 
   for (const session of sessions) {
+    // Snapshot for status/context queries (not used for cost anymore)
     insertSessionSnapshot(db, {
       agent,
       session_key: session.sessionKey,
@@ -158,39 +160,9 @@ async function processSessionsJson(
       sampled_at: now,
     });
 
-    // Record daily cost using sessions.json totals (authoritative cumulative values)
-    // Use jsonl only to resolve model name if sessions.json doesn't have it.
-    try {
-      const outputTokens = session.outputTokens;
-      const inputTokens = session.inputTokens;
-      let model = session.modelOverride ?? null;
-
-      if (!model) {
-        const jsonlPath = findJsonlPath(cfg.sessionsDir, session);
-        if (jsonlPath) {
-          const stats = parseSessionStats(jsonlPath);
-          if (stats?.model) model = stats.model;
-        }
-      }
-
-      if (outputTokens > 0 || inputTokens > 0) {
-        recordDailyCost(
-          db,
-          agent,
-          session.sessionKey,
-          today,
-          inputTokens,
-          outputTokens,
-          model,
-          cfg.probe.cost.customPrices
-        );
-        console.log(`[daemon] cost recorded: ${session.sessionKey.slice(0, 30)} in=${inputTokens} out=${outputTokens} model=${model}`);
-      } else {
-        console.log(`[daemon] cost skip: ${session.sessionKey.slice(0, 30)} — zero tokens in sessions.json`);
-      }
-    } catch (err) {
-      console.error(`[daemon] cost record error for ${session.sessionKey}:`, err);
-    }
+    // Cost is recorded exclusively from jsonl in processJsonlFile.
+    // sessions.json only provides coarse cumulative totals without per-turn
+    // or cache token breakdown, so we skip cost recording here.
   }
 
   return sessions.length;
@@ -214,26 +186,22 @@ async function processJsonlFile(
   // Fall back to UUID filename if no sessions.json entry (orphan transcript)
   const sessionKey = matchedSession?.sessionKey ?? path.basename(filePath, ".jsonl");
 
-  // For orphan sessions (no sessions.json entry), record cost from jsonl stats.
-  // Named sessions are handled in processSessionsJson with more accurate totals.
-  if (!matchedSession) {
-    try {
-      const stats = parseSessionStats(filePath);
-      if (stats && (stats.totalOutput > 0 || stats.totalInput > 0)) {
-        // Use the date the session was last active, not today
-        const lastActiveDate = stats.lastActiveAt > 0
-          ? new Date(stats.lastActiveAt * 1000).toISOString().slice(0, 10)
-          : todayString();
-        recordDailyCost(
-          db, agent, sessionKey, lastActiveDate,
-          stats.totalInput, stats.totalOutput,
-          stats.model, cfg.probe.cost.customPrices
-        );
-        console.log(`[daemon] cost recorded (orphan): ${sessionKey.slice(0, 30)} in=${stats.totalInput} out=${stats.totalOutput}`);
-      }
-    } catch (err) {
-      console.error(`[daemon] cost record error (orphan) for ${sessionKey}:`, err);
+  // Record per-turn cost data from jsonl for all sessions (named and orphan).
+  // This is the only cost-recording path — sessions.json is no longer used for billing.
+  // On fullScan we always re-parse to capture all turns; on incremental we still
+  // re-parse the full file because parseSessionStats reads everything anyway.
+  try {
+    const stats = parseSessionStats(filePath);
+    if (stats && stats.turns.length > 0) {
+      recordSessionTurns(db, agent, sessionKey, stats, cfg.probe.cost.customPrices);
+      console.log(
+        `[daemon] turns recorded: ${sessionKey.slice(0, 30)} ` +
+        `turns=${stats.turns.length} in=${stats.totalInput} out=${stats.totalOutput} ` +
+        `cacheRead=${stats.totalCacheRead} cacheWrite=${stats.totalCacheWrite} model=${stats.model}`
+      );
     }
+  } catch (err) {
+    console.error(`[daemon] turn record error for ${sessionKey}:`, err);
   }
 
   const { entries, compactEvents } =

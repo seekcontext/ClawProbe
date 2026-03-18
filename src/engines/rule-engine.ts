@@ -1,6 +1,6 @@
 import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
-import { getCompactEvents, getSuggestions, upsertSuggestion, removeSuggestion, getDailyCostSummary } from "../core/db.js";
+import { getCompactEvents, getSuggestions, upsertSuggestion, removeSuggestion, getTurnSummaryByDate } from "../core/db.js";
 import { getWindowSize } from "../core/model-windows.js";
 import { parseSessionStats } from "../core/jsonl-parser.js";
 import { findJsonlPath, getActiveSession } from "../core/session-store.js";
@@ -141,25 +141,29 @@ const CostSpikeRule: Rule = {
   id: "cost-spike",
   name: "Cost Spike Detected",
   check({ db, agent }) {
-    const rows = getDailyCostSummary(db, agent, 8);
-    if (rows.length < 3) return null;
+    const rawRows = getTurnSummaryByDate(db, agent, 8);
+    // Collapse model-split rows into one entry per date
+    const byDate = new Map<string, number>();
+    for (const r of rawRows) {
+      byDate.set(r.date, (byDate.get(r.date) ?? 0) + r.estimated_usd);
+    }
+    if (byDate.size < 3) return null;
 
     const today = new Date().toISOString().slice(0, 10);
-    const todayRow = rows.find((r) => r.date === today);
-    if (!todayRow || todayRow.total_usd === 0) return null;
+    const todayUsd = byDate.get(today) ?? 0;
+    if (todayUsd === 0) return null;
 
-    const priorRows = rows.filter((r) => r.date !== today);
-    const priorAvg =
-      priorRows.reduce((s, r) => s + r.total_usd, 0) / priorRows.length;
+    const priorEntries = [...byDate.entries()].filter(([d]) => d !== today);
+    const priorAvg = priorEntries.reduce((s, [, v]) => s + v, 0) / priorEntries.length;
 
-    if (priorAvg === 0 || todayRow.total_usd < priorAvg * 2) return null;
+    if (priorAvg === 0 || todayUsd < priorAvg * 2) return null;
 
     return {
       ruleId: "cost-spike",
       severity: "warning",
-      title: `Today's cost is ${Math.round(todayRow.total_usd / priorAvg)}× the weekly average`,
+      title: `Today's cost is ${Math.round(todayUsd / priorAvg)}× the weekly average`,
       detail:
-        `Today: $${todayRow.total_usd.toFixed(2)} vs weekly avg $${priorAvg.toFixed(2)}/day. ` +
+        `Today: $${todayUsd.toFixed(2)} vs weekly avg $${priorAvg.toFixed(2)}/day. ` +
         `Check if a long-running task, large file, or model change is driving up costs.`,
       action: "Run `clawprobe cost --day` and `clawprobe context` for details",
     };
