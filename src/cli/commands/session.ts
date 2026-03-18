@@ -9,7 +9,7 @@ import {
 } from "../../engines/cost.js";
 import chalk from "chalk";
 import {
-  header, fmtUsd, fmtTokens, fmtDate, fmtDuration, makeTable, outputJson,
+  header, fmtUsd, fmtTokens, fmtDate, fmtDuration, makeTable, computeColWidths, outputJson,
   severity,
 } from "../format.js";
 
@@ -155,25 +155,25 @@ export async function runSession(
         }
       }
     } else {
-      const table = makeTable(
-        ["Session Key", "Model", "Ctx / Out tokens", "Cost", "Compacts", "Last Active"],
-        [30, 22, 18, 10, 10, 16]
-      );
-      for (const c of namedSessions) {
+      const head = ["Session Key", "Model", "Ctx / Out tokens", "Cost", "Compacts", "Last Active"];
+      const rows = namedSessions.map((c) => {
         const isActive = active?.sessionKey === c.sessionKey;
         const keyDisplay = c.sessionKey.length > 25
           ? `${c.sessionKey.slice(0, 24)}…${isActive ? " ●" : ""}`
           : `${c.sessionKey}${isActive ? " ●" : ""}`;
         const ctxTokens = c.contextTokens || c.inputTokens;
-        table.push([
+        return [
           keyDisplay,
           c.model ?? "—",
           `${fmtTokens(ctxTokens)} / ${fmtTokens(c.outputTokens)}`,
           c.estimatedUsd > 0 ? fmtUsd(c.estimatedUsd) : "—",
           String(c.compactionCount),
           c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—",
-        ]);
-      }
+        ];
+      });
+      const colWidths = computeColWidths(head, rows, [20, 16, 14, 8, 8, 12]);
+      const table = makeTable(head, colWidths);
+      for (const row of rows) table.push(row);
       console.log(table.toString());
       if (namedSessions.some(c => c.sessionKey.length > 25)) {
         console.log(severity.muted("  Tip: use --full to see complete session keys"));

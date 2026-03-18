@@ -6,7 +6,7 @@ import { getActiveSession, findJsonlPath } from "../../core/session-store.js";
 import { parseSessionStats } from "../../core/jsonl-parser.js";
 import { analyzeWorkspaceFiles } from "../../engines/file-analyzer.js";
 import {
-  header, makeTable, fmtTokens, truncBadge, outputJson, severity, getWindowSize, divider,
+  header, makeTable, computeColWidths, fmtTokens, truncBadge, outputJson, severity, getWindowSize, divider,
 } from "../format.js";
 
 interface ContextOptions {
@@ -141,19 +141,17 @@ export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Pro
   if (wsFiles.length === 0) {
     console.log(severity.muted("    (none found)"));
   } else {
-    const table = makeTable(
-      ["File", "Raw", "Injected", "~Tokens", "Status"],
-      [18, 14, 14, 10, 12]
-    );
-    for (const f of wsFiles) {
-      table.push([
-        f.name,
-        `${f.rawChars.toLocaleString()} chars`,
-        `${f.injectedChars.toLocaleString()} chars`,
-        fmtTok(f.injectedEstTokens),
-        truncBadge(f.wasTruncated),
-      ]);
-    }
+    const head = ["File", "Raw", "Injected", "~Tokens", "Status"];
+    const rows = wsFiles.map((f) => [
+      f.name,
+      `${f.rawChars.toLocaleString()} chars`,
+      `${f.injectedChars.toLocaleString()} chars`,
+      fmtTok(f.injectedEstTokens),
+      truncBadge(f.wasTruncated),
+    ]);
+    const colWidths = computeColWidths(head, rows, [18, 14, 14, 10, 12]);
+    const table = makeTable(head, colWidths);
+    for (const row of rows) table.push(row);
     console.log(table.toString());
 
     if (analysis.truncatedFiles.length > 0) {
@@ -178,13 +176,18 @@ export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Pro
   if (skills.length > 0) {
     console.log(severity.bold(`  Skills (${skills.length} loaded):`));
     console.log();
-    const skillTable = makeTable(["Skill", "Chars", "~Tokens"], [24, 12, 12]);
-    for (const sk of skills.slice(0, 10)) {
-      skillTable.push([sk.name, sk.chars.toLocaleString(), fmtTok(estTok(sk.chars))]);
-    }
+    const skillHead = ["Skill", "Chars", "~Tokens"];
+    const skillRows = skills.slice(0, 10).map((sk) => [
+      sk.name,
+      sk.chars.toLocaleString(),
+      fmtTok(estTok(sk.chars)),
+    ]);
     if (skills.length > 10) {
-      skillTable.push([`… +${skills.length - 10} more`, "", ""]);
+      skillRows.push([`… +${skills.length - 10} more`, "", ""]);
     }
+    const skillColWidths = computeColWidths(skillHead, skillRows, [24, 12, 10]);
+    const skillTable = makeTable(skillHead, skillColWidths);
+    for (const row of skillRows) skillTable.push(row);
     console.log(skillTable.toString());
     console.log(`  Skills subtotal:  ~${fmtTokens(estTok(skillsChars))} tokens`);
     console.log();

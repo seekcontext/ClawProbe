@@ -241,6 +241,34 @@ export function fmtDuration(minutes: number): string {
 
 // --- Tables ---
 
+/** Strip ANSI escape codes for accurate display width. */
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/**
+ * Compute column widths from header + rows. Use minWidths to enforce minimums.
+ * Handles chalk-colored strings by stripping ANSI codes before measuring.
+ */
+export function computeColWidths(
+  head: string[],
+  rows: string[][],
+  minWidths?: number[]
+): number[] {
+  const widths = head.map((h) => stripAnsi(h).length);
+  for (const row of rows) {
+    for (let i = 0; i < row.length; i++) {
+      widths[i] = Math.max(widths[i] ?? 0, stripAnsi(String(row[i])).length);
+    }
+  }
+  if (minWidths) {
+    for (let i = 0; i < widths.length; i++) {
+      widths[i] = Math.max(widths[i], minWidths[i] ?? 0);
+    }
+  }
+  return widths;
+}
+
 export function makeTable(head: string[], colWidths?: number[]): Table.Table {
   const widths = colWidths ?? head.map(() => 16);
   return new Table({
