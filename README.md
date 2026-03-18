@@ -12,7 +12,6 @@ Token usage. API cost. Context health. Smart alerts. All in one place — withou
 [Why clawprobe](#why-clawprobe) •
 [Quick Start](#quick-start) •
 [Commands](#commands) •
-[`top` Live Dashboard](#clawprobe-top--live-dashboard) •
 [Agent Integration](#agent-integration) •
 [Configuration](#configuration) •
 [How It Works](#how-it-works)
@@ -27,12 +26,12 @@ clawprobe fixes that. It watches OpenClaw's files in the background and gives yo
 
 | Problem | clawprobe |
 |---------|-----------|
-| "Is my agent healthy right now?" | `clawprobe status` — one-glance dashboard |
-| "I want to keep watching it live" | `clawprobe top` — htop-style live dashboard |
-| "Why is context getting compacted so often?" | `clawprobe context` + `clawprobe suggest` |
+| "Is my agent healthy right now?" | `clawprobe status` — instant snapshot |
+| "I want to keep watching it live" | `clawprobe top` — live dashboard, auto-refreshing |
+| "Why is context compacting so often?" | `clawprobe context` + `clawprobe suggest` |
 | "What did the agent forget after compaction?" | `clawprobe compacts` |
 | "What is this costing me?" | `clawprobe cost --week` with per-model pricing |
-| "What is my TOOLS.md taking up?" | Truncation detection + token estimates |
+| "Is my TOOLS.md actually reaching the model?" | Truncation detection built-in |
 
 **No configuration required. Zero side effects. 100% local.**
 
@@ -44,44 +43,43 @@ clawprobe fixes that. It watches OpenClaw's files in the background and gives yo
 npm install -g clawprobe
 
 clawprobe start    # Launch background daemon (auto-detects OpenClaw)
-clawprobe status   # Instant dashboard
+clawprobe status   # Instant snapshot
 ```
 
-That's it. clawprobe auto-detects your OpenClaw installation at `~/.openclaw`. No API keys, no accounts, no telemetry.
+clawprobe auto-detects your OpenClaw installation. No API keys, no accounts, no telemetry.
 
 ---
 
 ## Commands
 
-### `clawprobe status` — Dashboard
+### `clawprobe status` — Instant Snapshot
 
-Everything you need at a glance: session, model, context utilization, today's cost, and active alerts.
+Everything at a glance: session, model, context utilization, today's cost, and active alerts.
 
 ```
 $ clawprobe status
 
 📊  Agent Status  (active session)
 ──────────────────────────────────────────────────
-  Agent:       main
-  Session:     agent:main:workspace:direct:xxx ●
-  Model:       moonshot/kimi-k2.5
-  Provider:    moonshot
+  Agent:     main
+  Session:   agent:main:workspace:direct:xxx ●
+  Model:     moonshot/kimi-k2.5
+  Active:    Today 16:41   Compacts: 2
 
   Context:   87.3K / 200.0K tokens  ███████░░░  44%
-  Input:     72.4K tokens   Output: 5.2K tokens
-  Compacts:  2   Last active: Today 16:41
+  Tokens:    72.4K in / 5.2K out
 
-  Today:     $0.12
+  Today:     $0.12  → clawprobe cost for full breakdown
 
-  ⚠  Context window at 44% capacity
-     → Consider starting a fresh session if nearing limit
+  🟡  Context window at 44% capacity
+       → Consider starting a fresh session or manually compacting now
 ```
 
 ---
 
 ### `clawprobe top` — Live Dashboard
 
-An htop-style auto-refreshing view — fixed header, scrollable turn list, pinned alerts footer. Open it in a side terminal while your agent runs a long task.
+Open it in a side terminal while your agent runs a long task. Stays on screen and updates every 2 seconds — context bar, cost counters, and a live turn-by-turn feed.
 
 ```
 clawprobe top  refreshing every 2s  (q / Ctrl+C to quit)     03/18/2026 17:42:35
@@ -92,7 +90,7 @@ clawprobe top  refreshing every 2s  (q / Ctrl+C to quit)     03/18/2026 17:42:35
   Active:  Today 17:42   Compacts: 2
 ────────────────────────────────────────────────────────────────────────────────
   Context   ████████░░░░░░░░░░░░░░░░  44%   87.3K / 200.0K tokens
-  Headroom  112.7K tokens remaining (91%)
+  Headroom  112.7K tokens remaining (56%)
 ────────────────────────────────────────────────────────────────────────────────
   Session cost  $0.52        Input   859.2K tok      Output   29.8K tok
   Today total   $0.67        Cache read   712.0K tok
@@ -104,22 +102,16 @@ clawprobe top  refreshing every 2s  (q / Ctrl+C to quit)     03/18/2026 17:42:35
   25    17:19     20.4K    661      $0.0094
   24    15:57     564      39       $0.0014
   23    15:56     18.8K    231      $0.0076        ◆ compact
-  …                            (fills terminal height)
 ────────────────────────────────────────────────────────────────────────────────
   🟡  Context window at 44% capacity
-     → Consider starting a fresh session or manually compacting now
   Costs are estimates based on public pricing.
 ```
 
-- **Fixed header** — agent info, context bar, and cost summary always visible
-- **Scrollable turns** — fills available terminal height, newest turn on top
-- **Pinned footer** — active alerts always visible at the bottom
-- **Alternate screen** — exits cleanly, restores your terminal (like `htop`/`vim`)
-- `q` or `Ctrl+C` to quit
+`q` or `Ctrl+C` to quit. Exits cleanly without leaving a mess in your terminal.
 
 ```bash
 clawprobe top                  # default 2s refresh
-clawprobe top --interval 5     # custom refresh rate
+clawprobe top --interval 5     # slower refresh
 clawprobe top --agent coder    # target a specific agent
 ```
 
@@ -146,17 +138,16 @@ $ clawprobe cost --week
   Input:   1.0M tokens  $0.65  (97%)
   Output:  47.8K tokens  $0.03  (3%)
 
-  Costs are estimates based on public pricing.
-  Verify with your provider's billing dashboard.
+  Costs are estimates. Verify with your provider's billing dashboard.
 ```
 
-Built-in prices for: OpenAI (GPT-4o, o1, o3, o4-mini), Anthropic (Claude 3/3.5/3.7 Sonnet/Opus/Haiku), Google (Gemini 2.0/2.5 Flash/Pro), Moonshot (kimi-k2.5), DeepSeek (v3, r1), xAI (Grok), and more. Override or add any model via `~/.clawprobe/config.json`.
+Built-in prices for: OpenAI (GPT-4o, o1, o3, o4-mini), Anthropic (Claude 3/3.5/3.7 Sonnet/Opus/Haiku), Google (Gemini 2.0/2.5 Flash/Pro), Moonshot (kimi-k2.5), DeepSeek (v3, r1), and more. Add any unlisted model via `~/.clawprobe/config.json`.
 
 ---
 
-### `clawprobe session` — Session Detail
+### `clawprobe session` — Session Breakdown
 
-Per-session breakdown with a turn-by-turn cost and token timeline.
+Drill into any session: total cost, token timeline, and exactly what each turn consumed.
 
 ```
 $ clawprobe session
@@ -181,7 +172,7 @@ $ clawprobe session
 
 ### `clawprobe context` — Context Window Analysis
 
-See what's eating your context window and catch truncation before it silently breaks your agent's tool knowledge.
+Find out what's filling your context window, and catch silent truncation before it causes problems.
 
 ```
 $ clawprobe context
@@ -194,7 +185,7 @@ $ clawprobe context
   Conversation est:    ~83.1K tokens  (messages + system prompt + tools)
 
   ⚠ TOOLS.md: 31% truncated — model never sees this content
-    Run: clawprobe context --json  or increase bootstrapMaxChars in openclaw.json
+    Increase bootstrapMaxChars in openclaw.json to fix this
 
   Remaining:  112.7K tokens (56%)
 ```
@@ -203,7 +194,7 @@ $ clawprobe context
 
 ### `clawprobe compacts` — Compaction Events
 
-Every compaction is captured. See what was discarded and archive key context with `--save`.
+Every compaction is captured. See exactly what was discarded — and save it before it's gone forever.
 
 ```
 $ clawprobe compacts
@@ -223,25 +214,25 @@ $ clawprobe compacts
 
 ### `clawprobe suggest` — Optimization Alerts
 
-Automatic detection of common issues. Fires only when something actually needs your attention.
+Automatic detection of common issues. Only fires when something actually needs your attention.
 
 | Rule | What It Detects |
 |------|----------------|
-| `tools-truncation` | TOOLS.md exceeds bootstrap limit — tool descriptions silently cut off |
-| `high-compact-freq` | Context fills and compacts too fast (< 30 min intervals) |
-| `context-headroom` | Context window > 90% full — compaction imminent |
-| `cost-spike` | Today's spend > 2× weekly average |
-| `memory-bloat` | MEMORY.md too large — burning tokens every session |
+| `tools-truncation` | TOOLS.md cut off — tool descriptions the model can't see |
+| `high-compact-freq` | Context fills too fast, compacting every < 30 minutes |
+| `context-headroom` | Context window > 90% full — compaction is imminent |
+| `cost-spike` | Today's spend > 2× your weekly average |
+| `memory-bloat` | MEMORY.md too large — wasting tokens on every turn |
 
-Dismiss noisy rules with `--dismiss <rule-id>`.
+Dismiss noisy rules: `clawprobe suggest --dismiss <rule-id>`
 
 ---
 
 ## Agent Integration
 
-clawprobe is designed to be called **by agents**, not just humans. Every command supports `--json` for clean, parseable output. Errors are always JSON too — never coloured text on stderr.
+clawprobe is designed to be called **by agents**, not just humans. Every command supports `--json` for clean, parseable output. Errors are always structured JSON — never coloured text that breaks parsing.
 
-### One-shot health check
+### Health check in one call
 
 ```bash
 clawprobe status --json
@@ -272,22 +263,22 @@ clawprobe status --json
 ### Discover the output schema
 
 ```bash
-clawprobe schema           # List all commands with descriptions
-clawprobe schema status    # Full field-by-field spec for status --json
-clawprobe schema cost      # Field spec for cost --json
+clawprobe schema           # list all commands
+clawprobe schema status    # full field spec for status --json
+clawprobe schema cost      # full field spec for cost --json
 ```
 
-### Dismiss a suggestion from a script
+### Dismiss a suggestion programmatically
 
 ```bash
 clawprobe suggest --dismiss context-headroom --json
 # → { "ok": true, "dismissed": "context-headroom" }
 ```
 
-### Error responses are always parseable
+### Errors are always parseable
 
 ```bash
-clawprobe session --json   # when no session is active
+clawprobe session --json   # no active session
 # → { "ok": false, "error": "no_active_session", "message": "..." }
 # exit code 1
 ```
@@ -296,7 +287,7 @@ clawprobe session --json   # when no session is active
 
 ## Configuration
 
-Optional config at `~/.clawprobe/config.json` (auto-created on first `clawprobe start`):
+Optional config at `~/.clawprobe/config.json` — auto-created on first `clawprobe start`:
 
 ```json
 {
@@ -307,57 +298,30 @@ Optional config at `~/.clawprobe/config.json` (auto-created on first `clawprobe 
   },
   "cost": {
     "customPrices": {
-      "my-custom-model": { "input": 1.00, "output": 3.00 }
+      "my-provider/my-model": { "input": 1.00, "output": 3.00 }
     }
   },
   "alerts": {
     "dailyBudgetUsd": 5.00
   },
   "rules": {
-    "disabled": ["memory-bloat"],
-    "compactionFreqThresholdMin": 30,
-    "memoryBloatThresholdChars": 20000
+    "disabled": ["memory-bloat"]
   }
 }
 ```
 
-Most users need zero configuration. clawprobe auto-detects everything.
+Most users need zero configuration. clawprobe auto-detects everything from your existing OpenClaw setup.
 
 ---
 
 ## How It Works
 
-clawprobe reads OpenClaw's existing data files — no patches, no plugins, no hooks.
-
-```
-~/.openclaw/                              clawprobe
-──────────────────────────────────        ─────────────────────────────────
-sessions.json               →    Session metadata, token counts, model
-*.jsonl transcripts         →    Turn-level costs, compact events, usage
-workspace/*.md              →    File size analysis, truncation detection
-openclaw.json               →    Model config, bootstrap limits
-                                          │
-                                          ▼
-                                ~/.clawprobe/probe.db  (SQLite, local only)
-                                          │
-                                          ▼
-                                 CLI + optimization engine
-```
-
-**Why it just works:**
+clawprobe reads OpenClaw's existing files in the background — no code changes, no plugins, no hooks required.
 
 - **Zero configuration** — auto-detects OpenClaw at `~/.openclaw`
-- **Zero side effects** — read-only; only writes to its own `~/.clawprobe/` directory
-- **Background daemon** — `clawprobe start` launches a watcher with 300ms debounce
-- **4 production dependencies** — chokidar, commander, chalk, cli-table3. No cloud, no telemetry.
-
----
-
-## Compatibility
-
-clawprobe works with any OpenClaw version that writes `sessions.json` and `.jsonl` transcript files to `~/.openclaw/agents/<agent>/sessions/`.
-
-**Requirements:** Node.js ≥ 22 · macOS or Linux (Windows via WSL2)
+- **Zero side effects** — never touches OpenClaw's files; writes only to `~/.clawprobe/`
+- **Background daemon** — `clawprobe start` watches for changes and keeps the local database current
+- **Minimal footprint** — 4 production dependencies, no cloud services, no telemetry
 
 ---
 
@@ -366,6 +330,12 @@ clawprobe works with any OpenClaw version that writes `sessions.json` and `.json
 - **100% local** — no data ever leaves your machine
 - **No telemetry** — clawprobe collects nothing
 - **No accounts, no API keys** — install and run
+
+---
+
+## Compatibility
+
+Works with any OpenClaw version. Requires Node.js ≥ 22 · macOS or Linux (Windows via WSL2).
 
 ---
 
