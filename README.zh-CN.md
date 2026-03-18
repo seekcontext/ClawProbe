@@ -50,6 +50,22 @@ clawprobe status   # 查看即时快照
 
 clawprobe 自动识别你的 OpenClaw 安装。无需 API Key、无需注册账号、无遥测数据上报。
 
+### 作为 OpenClaw Skill 安装（一行命令）
+
+如果你使用 OpenClaw，可以将 clawprobe 安装为 Skill，让 Agent 具备自我监控能力：
+
+```bash
+clawhub install clawprobe
+```
+
+或手动复制到 skills 目录：
+
+```bash
+cp -r skills/clawprobe ~/.openclaw/skills/
+```
+
+新建 OpenClaw 会话后，Agent 即可直接调用 `clawprobe` 命令进行自我监控。完整 Skill 定义见 [`skills/clawprobe/SKILL.md`](./skills/clawprobe/SKILL.md)。
+
 ---
 
 ## 命令说明

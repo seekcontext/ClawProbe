@@ -50,6 +50,23 @@ clawprobe status   # Instant snapshot
 
 clawprobe auto-detects your OpenClaw installation. No API keys, no accounts, no telemetry.
 
+### Install as an OpenClaw skill (one command)
+
+If you use OpenClaw, install clawprobe as a skill so your agent can monitor itself:
+
+```bash
+clawhub install clawprobe
+```
+
+Or manually drop the skill into your workspace:
+
+```bash
+# copy skills/clawprobe/ from this repo into your agent's skills folder
+cp -r skills/clawprobe ~/.openclaw/skills/
+```
+
+Start a new OpenClaw session and the agent will automatically have access to `clawprobe` commands for self-monitoring. See [`skills/clawprobe/SKILL.md`](./skills/clawprobe/SKILL.md) for the full skill definition.
+
 ---
 
 ## Commands

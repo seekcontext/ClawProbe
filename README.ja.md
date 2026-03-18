@@ -50,6 +50,22 @@ clawprobe status   # 即時スナップショットを確認
 
 clawprobe は OpenClaw のインストール先を自動検出します。API キー不要、アカウント登録不要、テレメトリなし。
 
+### OpenClaw スキルとしてインストール（1 コマンド）
+
+OpenClaw を使用している場合、clawprobe をスキルとしてインストールすることで、エージェントが自分自身を監視できるようになります：
+
+```bash
+clawhub install clawprobe
+```
+
+または手動でスキルディレクトリにコピー：
+
+```bash
+cp -r skills/clawprobe ~/.openclaw/skills/
+```
+
+新しい OpenClaw セッションを開始すると、エージェントは自動的に `clawprobe` コマンドにアクセスできるようになります。スキルの完全な定義は [`skills/clawprobe/SKILL.md`](./skills/clawprobe/SKILL.md) を参照してください。
+
 ---
 
 ## コマンド一覧
