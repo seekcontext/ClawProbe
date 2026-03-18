@@ -375,31 +375,4 @@ program
     runSchema(commandName);
   });
 
-// --- grouped help (hide auto-generated Commands: block, replace with grouped layout) ---
-program.configureHelp({
-  // Return empty list so Commander prints no "Commands:" section
-  visibleCommands: () => [],
-});
-program.addHelpText("after", [
-  "",
-  "Observability:",
-  "  status              Current session: tokens, model, compactions, today's cost",
-  "  cost                API cost by day / week / month / all-time",
-  "  session [key]       Per-session cost and turn-by-turn breakdown",
-  "  context             Context window composition and utilization",
-  "  suggest             Optimization suggestions and rule alerts",
-  "  compacts            Recent compaction events (--save to archive messages)",
-  "",
-  "Daemon:",
-  "  start               Start the background file-watcher daemon",
-  "  stop                Stop the daemon",
-  "",
-  "Tooling:",
-  "  config              Show resolved OpenClaw configuration (--diag for full audit)",
-  "  reset-db            Wipe and rebuild the local database",
-  "  schema [cmd]        Machine-readable JSON output schema (for agent integration)",
-  "",
-  "Run \`clawprobe <command> --help\` for command-specific options.",
-].join("\n"));
-
 program.parse(process.argv);
