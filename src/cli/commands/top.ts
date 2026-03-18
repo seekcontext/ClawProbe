@@ -15,6 +15,21 @@ interface TopOptions {
   interval?: string;
 }
 
+// ── ANSI helpers ─────────────────────────────────────────────────────────────
+
+/** Move cursor to absolute row (1-based), column 1. */
+const gotoRow = (row: number) => `\x1b[${row};1H`;
+/** Clear from cursor to end of line. */
+const clearEOL = "\x1b[K";
+/** Clear from cursor to end of screen. */
+const clearEOS = "\x1b[J";
+
+function writeLine(row: number, text: string): void {
+  process.stdout.write(gotoRow(row) + text + clearEOL);
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
 function isDaemonRunning(probeDir: string): boolean {
   const pidFile = path.join(probeDir, "daemon.pid");
   if (!fs.existsSync(pidFile)) return false;
@@ -37,58 +52,67 @@ function nowStr(): string {
   }).format(new Date()).replace(",", "");
 }
 
-/** Lines written in the previous render — used to erase leftover lines. */
-let _prevLineCount = 0;
-
-/**
- * Flicker-free render: move to top-left, overwrite each line with \x1b[K (clear to EOL),
- * then blank any leftover lines from the previous (taller) render.
- */
-function flushLines(lines: string[]): void {
-  // Move to top-left without clearing
-  process.stdout.write("\x1b[H");
-
-  const out = lines.map((l) => l + "\x1b[K").join("\n") + "\n";
-  process.stdout.write(out);
-
-  // Erase lines that were present last render but not this one
-  const leftover = _prevLineCount - lines.length;
-  if (leftover > 0) {
-    for (let i = 0; i < leftover; i++) {
-      process.stdout.write("\x1b[K\n");
-    }
-  }
-  _prevLineCount = lines.length;
+function costPlain(usd: number): string {
+  if (usd <= 0) return "$0.00";
+  return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
 }
 
+// ── Layout constants ──────────────────────────────────────────────────────────
+
+/**
+ * Fixed layout (row numbers, 1-based):
+ *
+ *   1   title bar
+ *   2   ─── separator
+ *   3   agent / daemon
+ *   4   session
+ *   5   model
+ *   6   active / compacts
+ *   7   ─── separator
+ *   8   context bar
+ *   9   headroom
+ *  10   ─── separator
+ *  11   cost row 1
+ *  12   cost row 2
+ *  13   ─── separator
+ *  14   "Recent turns" heading
+ *  15   column header
+ *  16…  turn rows   (fills to termH - footerHeight)
+ *  -N   alerts + disclaimer (footer, pinned to bottom)
+ */
+const HEADER_END_ROW = 15; // last fixed row before turns
+const FOOTER_HEIGHT  = 4;  // rows reserved at the bottom (hr + up to 2 alert lines + disclaimer)
+
 function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
-  const db = openDb(cfg.probeDir);
+  const W    = process.stdout.columns || 80;
+  const termH = process.stdout.rows   || 30;
+  const hr   = chalk.dim("─".repeat(W));
+
+  // ── Data ──────────────────────────────────────────────────────────────────
+  const db           = openDb(cfg.probeDir);
   const daemonRunning = isDaemonRunning(cfg.probeDir);
-
-  const sessionEntry = getActiveSession(cfg.sessionsDir);
-  const snapshot = sessionEntry ? getLatestSnapshot(db, agent, sessionEntry.sessionKey) : null;
+  const sessionEntry  = getActiveSession(cfg.sessionsDir);
+  const snapshot      = sessionEntry ? getLatestSnapshot(db, agent, sessionEntry.sessionKey) : null;
   const transcriptPath = sessionEntry ? findJsonlPath(cfg.sessionsDir, sessionEntry) : null;
-  const jsonlStats = transcriptPath ? parseSessionStats(transcriptPath) : null;
+  const jsonlStats    = transcriptPath ? parseSessionStats(transcriptPath) : null;
 
-  const sessionTokens = jsonlStats?.lastTotalTokens ?? sessionEntry?.sessionTokens ?? 0;
-  const windowSize = (sessionEntry?.windowSize || sessionEntry?.contextTokens) ?? 0;
-  const model = snapshot?.model ?? sessionEntry?.modelOverride ?? null;
+  const sessionTokens    = jsonlStats?.lastTotalTokens ?? sessionEntry?.sessionTokens ?? 0;
+  const windowSize       = (sessionEntry?.windowSize || sessionEntry?.contextTokens) ?? 0;
+  const model            = snapshot?.model ?? sessionEntry?.modelOverride ?? null;
   const resolvedWindowSize = getWindowSize(model, windowSize || sessionTokens);
-  const utilization = resolvedWindowSize > 0 ? sessionTokens / resolvedWindowSize : 0;
+  const utilization      = resolvedWindowSize > 0 ? sessionTokens / resolvedWindowSize : 0;
 
   let compactionCount = jsonlStats?.compactionCount ?? sessionEntry?.compactionCount ?? 0;
-  let lastActiveAt = jsonlStats?.lastActiveAt ?? sessionEntry?.updatedAt ?? 0;
+  let lastActiveAt    = jsonlStats?.lastActiveAt ?? sessionEntry?.updatedAt ?? 0;
   if (lastActiveAt === 0 && transcriptPath) {
-    try { lastActiveAt = Math.floor(fs.statSync(transcriptPath).mtimeMs / 1000); } catch { /* ignore */ }
+    try { lastActiveAt = Math.floor(fs.statSync(transcriptPath).mtimeMs / 1000); } catch { /**/ }
   }
 
-  // Cost
   const todaySummary = getPeriodCost(db, agent, "day", cfg.probe.cost.customPrices);
-  const sessionCost = jsonlStats
+  const sessionCost  = jsonlStats
     ? getSessionCostFromJsonl(jsonlStats, sessionEntry?.sessionKey ?? "", cfg.probe.cost.customPrices)
     : null;
 
-  // Suggestions
   const state: ProbeState = {
     db, agent,
     workspaceDir: cfg.workspaceDir,
@@ -99,167 +123,179 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
   const suggestions = runRules(state);
   persistSuggestions(db, agent, suggestions);
 
-  // ── Build lines buffer ────────────────────────────────────────────────────
-  const lines: string[] = [];
-  const W = process.stdout.columns || 80;
-  const hr = chalk.dim("─".repeat(W));
-
-  // Title row
-  const titlePlain = `clawprobe top  refreshing every ${intervalSec}s  (q / Ctrl+C to quit)`;
-  const ts = nowStr();
-  const pad = Math.max(0, W - titlePlain.length - ts.length);
-  lines.push(
+  // ── Row 1: title bar ───────────────────────────────────────────────────────
+  const ts       = nowStr();
+  const titleText = `clawprobe top  refreshing every ${intervalSec}s  (q / Ctrl+C to quit)`;
+  const titlePad = Math.max(0, W - titleText.length - ts.length);
+  writeLine(1,
     chalk.bold("clawprobe top") +
     chalk.dim(`  refreshing every ${intervalSec}s  (q / Ctrl+C to quit)`) +
-    " ".repeat(pad) +
+    " ".repeat(titlePad) +
     chalk.dim(ts)
   );
-  lines.push(hr);
 
-  // Agent + daemon
+  // ── Row 2: separator ──────────────────────────────────────────────────────
+  writeLine(2, hr);
+
+  // ── Row 3: agent + daemon ─────────────────────────────────────────────────
   const daemonBadge = daemonRunning
     ? severity.ok("● daemon running")
     : severity.warning("○ daemon stopped — run: clawprobe start");
-  lines.push(`  Agent: ${chalk.bold(agent)}   ${daemonBadge}`);
+  writeLine(3, `  Agent: ${chalk.bold(agent)}   ${daemonBadge}`);
 
   if (!sessionEntry) {
-    lines.push("");
-    lines.push(severity.muted("  No active session. Start OpenClaw and run a turn."));
-    lines.push("");
-    flushLines(lines);
+    writeLine(4, "");
+    writeLine(5, severity.muted("  No active session. Start OpenClaw and run a turn."));
+    // Clear everything below
+    process.stdout.write(gotoRow(6) + clearEOS);
     return;
   }
 
+  // ── Row 4: session ────────────────────────────────────────────────────────
   const statusBadge = lastActiveAt && (Date.now() / 1000 - lastActiveAt < 120)
     ? severity.ok("● active")
     : severity.muted("○ idle");
-  const keyShort = sessionEntry.sessionKey.length > 52
-    ? sessionEntry.sessionKey.slice(0, 49) + "…"
+  const keyShort = sessionEntry.sessionKey.length > W - 22
+    ? sessionEntry.sessionKey.slice(0, W - 25) + "…"
     : sessionEntry.sessionKey;
+  writeLine(4, `  Session: ${chalk.dim(keyShort)}  ${statusBadge}`);
 
-  lines.push(`  Session: ${chalk.dim(keyShort)}  ${statusBadge}`);
-  if (model) lines.push(`  Model:   ${model}`);
-  if (lastActiveAt) lines.push(`  Active:  ${fmtDate(lastActiveAt)}   Compacts: ${compactionCount}`);
+  // ── Row 5: model ──────────────────────────────────────────────────────────
+  writeLine(5, model ? `  Model:   ${model}` : "");
 
-  // Context bar
-  lines.push("");
-  lines.push(hr);
+  // ── Row 6: active / compacts ──────────────────────────────────────────────
+  writeLine(6, lastActiveAt
+    ? `  Active:  ${fmtDate(lastActiveAt)}   Compacts: ${compactionCount}`
+    : ""
+  );
+
+  // ── Row 7: separator ──────────────────────────────────────────────────────
+  writeLine(7, hr);
+
+  // ── Rows 8–9: context ─────────────────────────────────────────────────────
   if (sessionTokens > 0 && resolvedWindowSize > 0) {
-    const pct = Math.round(utilization * 100);
-    const bar = tokenBar(sessionTokens, resolvedWindowSize, 24);
+    const pct      = Math.round(utilization * 100);
+    const bar      = tokenBar(sessionTokens, resolvedWindowSize, 24);
     const ctxColor = utilization > 0.9 ? severity.critical : utilization > 0.7 ? severity.warning : (s: string) => s;
-    lines.push(`  Context   ${bar}  ${ctxColor(`${pct}%`)}   ${fmtTokens(sessionTokens)} / ${fmtTokens(resolvedWindowSize)} tokens`);
-    const remaining = resolvedWindowSize - sessionTokens;
+    writeLine(8, `  Context   ${bar}  ${ctxColor(`${pct}%`)}   ${fmtTokens(sessionTokens)} / ${fmtTokens(resolvedWindowSize)} tokens`);
     const remPct = 100 - pct;
-    const remStr = `  Headroom  ${fmtTokens(remaining)} tokens remaining (${remPct}%)`;
-    lines.push(remPct < 10 ? severity.critical(remStr) : remPct < 25 ? severity.warning(remStr) : chalk.dim(remStr));
+    const remStr = `  Headroom  ${fmtTokens(resolvedWindowSize - sessionTokens)} tokens remaining (${remPct}%)`;
+    writeLine(9, remPct < 10 ? severity.critical(remStr) : remPct < 25 ? severity.warning(remStr) : chalk.dim(remStr));
   } else {
-    lines.push(severity.muted("  Context   n/a  (run a turn first)"));
+    writeLine(8, severity.muted("  Context   n/a  (run a turn first)"));
+    writeLine(9, "");
   }
 
-  // Cost summary
-  lines.push("");
-  lines.push(hr);
-  const sessCost = sessionCost?.estimatedUsd ?? 0;
-  const todayCost = todaySummary.totalUsd;
-  const inputTok = sessionEntry.inputTokens;
+  // ── Row 10: separator ─────────────────────────────────────────────────────
+  writeLine(10, hr);
+
+  // ── Rows 11–12: cost summary ──────────────────────────────────────────────
+  const sessCost  = sessionCost?.estimatedUsd ?? 0;
+  const inputTok  = sessionEntry.inputTokens;
   const outputTok = sessionEntry.outputTokens;
   const cacheRead = jsonlStats?.totalCacheRead ?? 0;
-  lines.push(
+  writeLine(11,
     `  Session cost  ${fmtUsd(sessCost).padEnd(12)}` +
     `  Input   ${fmtTokens(inputTok)} tok`.padEnd(22) +
     `  Output   ${fmtTokens(outputTok)} tok`
   );
-  lines.push(
-    `  Today total   ${fmtUsd(todayCost).padEnd(12)}` +
+  writeLine(12,
+    `  Today total   ${fmtUsd(todaySummary.totalUsd).padEnd(12)}` +
     (cacheRead > 0 ? `  Cache read   ${fmtTokens(cacheRead)} tok` : "")
   );
 
-  // Recent turns — show as many as the terminal height allows
-  const turnList = sessionCost?.turns ?? [];
-  if (turnList.length > 0) {
-    lines.push("");
-    lines.push(hr);
-    lines.push(chalk.bold("  Recent turns"));
-    lines.push(
-      chalk.dim("  " + ["Turn", "Time", "ΔInput", "ΔOutput", "Cost", "Note"].map((h, i) => h.padEnd([6, 10, 9, 9, 12, 0][i]!)).join(""))
-    );
+  // ── Row 13: separator ─────────────────────────────────────────────────────
+  writeLine(13, hr);
 
-    // Reserve lines for: header block (~10) + separator + heading + col-header + footer (~3)
-    // Fill the remaining terminal rows with turn rows (min 4, max all turns)
-    const termH = process.stdout.rows || 30;
-    const reservedLines = lines.length + 3; // footer lines below turns
-    const maxTurnRows = Math.max(4, termH - reservedLines - 2);
-    const recentTurns = turnList.slice(-maxTurnRows).reverse();
+  // ── Rows 14–15: turns heading + column header ─────────────────────────────
+  writeLine(14, chalk.bold("  Recent turns"));
+  writeLine(15,
+    chalk.dim("  " + ["Turn", "Time", "ΔInput", "ΔOutput", "Cost", "Note"]
+      .map((h, i) => h.padEnd([6, 10, 9, 9, 12, 0][i]!))
+      .join(""))
+  );
 
-    recentTurns.forEach((turn, idx) => {
-      const isLatest = idx === 0;
-      const timeStr = turn.timestamp > 0
-        ? new Intl.DateTimeFormat("en-US", { timeZone: LOCAL_TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(turn.timestamp * 1000))
-        : "--:--";
-      const note = turn.compactOccurred ? chalk.cyan("◆ compact") : isLatest ? chalk.dim("← latest") : "";
-      // Use plain-text width for cost column to avoid ANSI code padding issues
-      const costPlain = `$${turn.estimatedUsd > 0 ? turn.estimatedUsd.toFixed(turn.estimatedUsd < 0.01 ? 4 : 2) : "0.00"}`;
-      const line = "  " + [
-        String(turn.turnIndex).padEnd(6),
-        timeStr.padEnd(10),
-        fmtTokens(turn.inputTokensDelta).padEnd(9),
-        fmtTokens(turn.outputTokensDelta).padEnd(9),
-        costPlain.padEnd(12),
-        note,
-      ].join("");
-      lines.push(isLatest ? chalk.white(line) : chalk.dim(line));
-    });
+  // ── Turn rows: fill between row 16 and footer ─────────────────────────────
+  const turnAreaStart = HEADER_END_ROW + 1; // 16
+  const turnAreaEnd   = termH - FOOTER_HEIGHT; // last turn row
+  const maxTurnRows   = Math.max(1, turnAreaEnd - turnAreaStart + 1);
+
+  const turnList    = sessionCost?.turns ?? [];
+  const recentTurns = turnList.slice(-maxTurnRows).reverse();
+
+  recentTurns.forEach((turn, idx) => {
+    const isLatest = idx === 0;
+    const timeStr  = turn.timestamp > 0
+      ? new Intl.DateTimeFormat("en-US", { timeZone: LOCAL_TZ, hour: "2-digit", minute: "2-digit", hour12: false })
+          .format(new Date(turn.timestamp * 1000))
+      : "--:--";
+    const note = turn.compactOccurred
+      ? chalk.cyan("◆ compact")
+      : isLatest ? chalk.dim("← latest") : "";
+    const line = "  " + [
+      String(turn.turnIndex).padEnd(6),
+      timeStr.padEnd(10),
+      fmtTokens(turn.inputTokensDelta).padEnd(9),
+      fmtTokens(turn.outputTokensDelta).padEnd(9),
+      costPlain(turn.estimatedUsd).padEnd(12),
+      note,
+    ].join("");
+    writeLine(turnAreaStart + idx, isLatest ? chalk.white(line) : chalk.dim(line));
+  });
+
+  // Clear any leftover turn rows (if this render has fewer turns than last)
+  for (let r = turnAreaStart + recentTurns.length; r <= turnAreaEnd; r++) {
+    writeLine(r, "");
   }
 
-  // Alerts
-  if (suggestions.length > 0) {
-    lines.push("");
-    lines.push(hr);
-    for (const s of suggestions.slice(0, 3)) {
-      const icon = s.severity === "critical" ? "🔴" : s.severity === "warning" ? "🟡" : "🔵";
-      lines.push(`  ${icon}  ${s.title}`);
-      if (s.action) lines.push(chalk.dim(`       → ${s.action}`));
-    }
-    if (suggestions.length > 3) {
-      lines.push(chalk.dim(`     … +${suggestions.length - 3} more  →  clawprobe suggest`));
-    }
+  // ── Footer: pinned to bottom ──────────────────────────────────────────────
+  const footerStart = termH - FOOTER_HEIGHT + 1;
+
+  writeLine(footerStart, hr);
+
+  // Alerts (up to 2 lines in footer — one line per alert, no action text)
+  const alertLines: string[] = [];
+  for (const s of suggestions.slice(0, 2)) {
+    const icon = s.severity === "critical" ? "🔴" : s.severity === "warning" ? "🟡" : "🔵";
+    alertLines.push(`  ${icon}  ${s.title}`);
+  }
+  if (suggestions.length > 2) {
+    alertLines.push(chalk.dim(`     … +${suggestions.length - 2} more  →  clawprobe suggest`));
   }
 
-  lines.push("");
-  lines.push(chalk.dim("  Costs are estimates based on public pricing."));
-
-  flushLines(lines);
+  writeLine(footerStart + 1, alertLines[0] ?? "");
+  writeLine(footerStart + 2, alertLines[1] ?? "");
+  writeLine(footerStart + 3, chalk.dim("  Costs are estimates based on public pricing."));
 }
 
 export async function runTop(cfg: ResolvedConfig, opts: TopOptions): Promise<void> {
-  const agent = opts.agent ?? cfg.probe.openclaw.agent;
+  const agent       = opts.agent ?? cfg.probe.openclaw.agent;
   const intervalSec = Math.max(1, parseInt(opts.interval ?? "2", 10));
 
-  // Disable stdin line buffering so 'q' can be detected immediately
+  // Raw mode so 'q' registers immediately without Enter
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (key: string) => {
-      if (key === "q" || key === "\u0003" /* Ctrl+C */) {
-        // Restore cursor and exit cleanly
-        process.stdout.write("\x1b[?25h"); // show cursor
+      if (key === "q" || key === "\u0003") {
+        process.stdout.write("\x1b[?25h\x1b[?1049l"); // restore cursor + alt screen
         process.exit(0);
       }
     });
   }
 
-  // Clear screen once on startup, then use flicker-free overwrite on each refresh
-  process.stdout.write("\x1b[2J\x1b[H");
-  // Hide cursor for cleaner rendering
-  process.stdout.write("\x1b[?25l");
+  // Switch to alternate screen buffer (like htop/vim) — leaves original terminal intact on exit
+  process.stdout.write("\x1b[?1049h");
+  // Clear and hide cursor
+  process.stdout.write("\x1b[2J\x1b[?25l");
 
-  // Restore cursor on unhandled exit
-  process.on("exit", () => process.stdout.write("\x1b[?25h"));
-  process.on("SIGINT", () => { process.stdout.write("\x1b[?25h"); process.exit(0); });
+  const restore = () => {
+    process.stdout.write("\x1b[?25h\x1b[?1049l");
+  };
+  process.on("exit",   restore);
+  process.on("SIGINT", () => { restore(); process.exit(0); });
 
-  // Initial render immediately, then on interval
   render(cfg, agent, intervalSec);
   setInterval(() => render(cfg, agent, intervalSec), intervalSec * 1000);
 }
