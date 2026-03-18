@@ -12,6 +12,7 @@ import { runCost } from "./cli/commands/cost.js";
 import { runSession } from "./cli/commands/session.js";
 import { runCompacts } from "./cli/commands/compacts.js";
 import { runSchema } from "./cli/commands/schema.js";
+import { runTop } from "./cli/commands/top.js";
 import { runContext } from "./cli/commands/context.js";
 import { runSuggest } from "./cli/commands/suggest.js";
 
@@ -365,6 +366,18 @@ program
         console.log(`\n  daemon.log not found at ${daemonLog}`);
       }
     }
+  });
+
+// --- top ---
+program
+  .command("top")
+  .description("Live dashboard — auto-refreshing agent status, context, cost and turns")
+  .option("--agent <name>", "Target agent")
+  .option("--interval <seconds>", "Refresh interval in seconds (default: 2)")
+  .action(async (opts) => {
+    const cfg = resolveConfig();
+    assertOpenClawExists(cfg);
+    await runTop(cfg, opts);
   });
 
 // --- schema ---
