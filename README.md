@@ -58,12 +58,9 @@ If you use OpenClaw, install clawprobe as a skill so your agent can monitor itse
 clawhub install clawprobe
 ```
 
-Or manually drop the skill into your workspace:
+Or tell your agent directly:
 
-```bash
-# copy skills/clawprobe/ from this repo into your agent's skills folder
-cp -r skills/clawprobe ~/.openclaw/skills/
-```
+> Read https://raw.githubusercontent.com/seekcontext/ClawProbe/main/skills/clawprobe/SKILL.md and follow the instructions to set up clawprobe self-monitoring.
 
 Start a new OpenClaw session and the agent will automatically have access to `clawprobe` commands for self-monitoring. See [`skills/clawprobe/SKILL.md`](./skills/clawprobe/SKILL.md) for the full skill definition.
 
