@@ -1,6 +1,7 @@
 import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
 import { getCompactEvents, getSuggestions, upsertSuggestion, removeSuggestion, getDailyCostSummary } from "../core/db.js";
+import { getWindowSize } from "../core/model-windows.js";
 import { analyzeWorkspaceFiles, getFileStaleness } from "./file-analyzer.js";
 import { ProbeConfig } from "../core/config.js";
 
@@ -107,19 +108,7 @@ const ContextLeakRule: Rule = {
 
     if (!snapshot) return null;
 
-    const MODEL_WINDOWS: Record<string, number> = {
-      "claude-opus-4": 200000,
-      "claude-sonnet-4.5": 200000,
-      "gpt-5.4": 128000,
-      "gpt-5.4-mini": 128000,
-      "gemini-3.1-flash": 1000000,
-      "deepseek-v3": 128000,
-    };
-
-    const modelKey = Object.keys(MODEL_WINDOWS).find((k) =>
-      snapshot.model?.includes(k)
-    );
-    const windowSize = modelKey ? MODEL_WINDOWS[modelKey]! : 128000;
+    const windowSize = getWindowSize(snapshot.model, snapshot.context_tokens);
     const utilization = snapshot.context_tokens / windowSize;
 
     if (utilization < 0.9) return null;
