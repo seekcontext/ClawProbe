@@ -9,6 +9,8 @@
 [![GitHub Stars](https://img.shields.io/github/stars/seekcontext/ClawProbe)](https://github.com/seekcontext/ClawProbe)
 [![License](https://img.shields.io/github/license/seekcontext/ClawProbe)](./LICENSE)
 
+[English](./README.md) · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md)
+
 [なぜ clawprobe か](#なぜ-clawprobe-か) •
 [クイックスタート](#クイックスタート) •
 [コマンド一覧](#コマンド一覧) •
