@@ -35,6 +35,7 @@ export async function runContext(cfg: ResolvedConfig, opts: ContextOptions): Pro
   if (opts.json) {
     outputJson({
       agent,
+      model,
       sessionTokens,
       windowSize: resolvedWindowSize,
       utilizationPct: resolvedWindowSize > 0 ? Math.round(sessionTokens / resolvedWindowSize * 100) : 0,

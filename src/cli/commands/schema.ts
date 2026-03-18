@@ -104,6 +104,7 @@ const SCHEMAS: Record<string, unknown> = {
     description: "Context window utilization analysis. Always exits 0.",
     fields: {
       agent:                    "string",
+      model:                    "string | null — model identifier used to resolve windowSize",
       sessionTokens:            "number — current tokens in context",
       windowSize:               "number — model window size",
       utilizationPct:           "number — 0–100",

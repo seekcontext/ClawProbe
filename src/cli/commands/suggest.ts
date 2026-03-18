@@ -19,12 +19,14 @@ export async function runSuggest(cfg: ResolvedConfig, opts: SuggestOptions): Pro
 
   if (opts.dismiss) {
     dismissSuggestion(db, agent, opts.dismiss);
+    if (opts.json) { outputJson({ ok: true, dismissed: opts.dismiss }); return; }
     printSuccess(`Dismissed suggestion: ${opts.dismiss}`);
     return;
   }
 
   if (opts.resetDismissed) {
     resetDismissed(db, agent);
+    if (opts.json) { outputJson({ ok: true, reset: true }); return; }
     printSuccess("Reset all dismissed suggestions.");
     return;
   }

@@ -189,7 +189,7 @@ const MemoryBloatRule: Rule = {
       detail:
         `MEMORY.md contains ${size.toLocaleString()} chars which consumes ~${Math.ceil(size / 4).toLocaleString()} tokens ` +
         `in every session's context. Consider archiving older entries to daily note files.`,
-      action: "Run `clawprobe memory list` to review and prune entries",
+      action: "Archive older entries manually, or split MEMORY.md into dated files to reduce token overhead",
     };
   },
 };
