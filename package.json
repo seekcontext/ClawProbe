@@ -1,6 +1,6 @@
 {
   "name": "clawprobe",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "The missing observability layer for OpenClaw agents",
   "keywords": [
     "openclaw",

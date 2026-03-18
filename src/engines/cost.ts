@@ -65,6 +65,8 @@ export const MODEL_PRICES: Record<string, ModelPrice> = {
   // cache read: ~1/6 of input price (¥1/M vs ¥6/M for kimi-k2.5)
   "moonshot/kimi-k2":                { input: 0.40,  output: 2.00,  cacheReadMultiplier: 0.167, cacheWriteMultiplier: 0 },
   "moonshot/kimi-k2.5":              { input: 0.60,  output: 2.00,  cacheReadMultiplier: 0.167, cacheWriteMultiplier: 0 },
+  // "delivery-mirror" is Moonshot's internal load-balancing alias for kimi-k2.5
+  "moonshot/delivery-mirror":        { input: 0.60,  output: 2.00,  cacheReadMultiplier: 0.167, cacheWriteMultiplier: 0 },
   // Alibaba (Qwen) — https://help.aliyun.com/zh/model-studio/getting-started/models
   "qwen/qwen3-max":                  { input: 0.34,  output: 1.38  },
   "qwen/qwen3.5-plus":               { input: 0.11,  output: 0.66  },
@@ -458,8 +460,11 @@ export function getPeriodCost(
   const totalUsd    = daily.reduce((s, d) => s + d.usd, 0);
   const totalInput  = daily.reduce((s, d) => s + d.inputTokens, 0);
   const totalOutput = daily.reduce((s, d) => s + d.outputTokens, 0);
-  const activeDays  = Math.max(daily.length, 1);
-  const dailyAvg    = totalUsd / activeDays;
+  // Use the full window span (not just active days) so monthEstimate reflects
+  // true average spend including idle days.
+  // For "all" period there's no fixed window, fall back to actual active days.
+  const spanDays = period === "all" ? Math.max(daily.length, 1) : days;
+  const dailyAvg = totalUsd / Math.max(spanDays, 1);
 
   return {
     period: periodLabel,
