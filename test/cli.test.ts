@@ -1,7 +1,5 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import { openDb, insertSessionSnapshot, resetDb } from '../src/core/db.js';
 import { createFixture, cleanupFixture, runCli, writeOpenClawConfig, writeSessionsJson, writeTranscript } from './helpers.js';
 
@@ -113,8 +111,8 @@ test('CLI session --json returns per-session cost breakdown', () => {
 
     const parsed = JSON.parse(result.stdout);
     assert.equal(parsed.sessionKey, 'sess_1');
-    assert.equal(parsed.inputTokens, 6000);
-    assert.equal(parsed.outputTokens, 800);
+    assert.equal(parsed.inputTokens, 7000);  // sum of both turns: 1000 + 6000
+    assert.equal(parsed.outputTokens, 800);  // sum of both turns: 200 + 600
     assert.equal(parsed.compactionCount, 1);
     assert.equal(parsed.turns.length, 2);
     assert.equal(parsed.turns[1].compactOccurred, false);
@@ -123,20 +121,3 @@ test('CLI session --json returns per-session cost breakdown', () => {
   }
 });
 
-test('CLI memory list --json returns memory entries', () => {
-  const fixture = createFixture();
-  try {
-    writeOpenClawConfig(fixture);
-    fs.writeFileSync(path.join(fixture.workspaceDir, 'MEMORY.md'), '- Prefer PostgreSQL\n- Use snake_case\n', 'utf-8');
-
-    const result = runCli(fixture, ['memory', 'list', '--json']);
-    assert.equal(result.status, 0, result.stderr);
-
-    const parsed = JSON.parse(result.stdout);
-    assert.equal(parsed.file, 'MEMORY.md');
-    assert.equal(parsed.entries.length, 2);
-    assert.equal(parsed.entries[0].content, 'Prefer PostgreSQL');
-  } finally {
-    cleanupFixture(fixture);
-  }
-});

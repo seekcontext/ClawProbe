@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { openDb, resetDb, insertSessionSnapshot, insertFileSnapshot, getLatestFileSnapshots } from '../src/core/db.js';
-import { estimateCost, getSessionCost, recordDailyCost, getPeriodCost, todayString } from '../src/engines/cost.js';
+import { openDb, resetDb, insertSessionSnapshot, insertFileSnapshot, getLatestFileSnapshots, upsertTurnRecord } from '../src/core/db.js';
+import { estimateCost, getSessionCost, getPeriodCost, todayString } from '../src/engines/cost.js';
 import { createFixture, cleanupFixture } from './helpers.js';
 
 test('estimateCost supports exact and fuzzy model matches', () => {
@@ -69,10 +69,10 @@ test('duplicate session snapshot same second: token deltas not double-counted in
   }
 });
 
-test('duplicate session snapshot same second: recordDailyCost called with correct single delta', async () => {
+test('duplicate session snapshot same second: upsertTurnRecord called with correct single delta', async () => {
   // Regression: if two identical snapshots at the same sampled_at were stored,
-  // the daemon would call recordDailyCost twice with the same delta.
-  // With upsert, the second insert is a no-op → cost is recorded only once.
+  // the daemon would record cost twice with the same delta.
+  // With upsert on turn_records, the second insert is a no-op → cost is recorded only once.
   const fixture = createFixture();
   try {
     const db = openDb(fixture.probeDir);
@@ -84,19 +84,17 @@ test('duplicate session snapshot same second: recordDailyCost called with correc
     // Duplicate at same second:
     insertSessionSnapshot(db, { ...base, input_tokens: 1_000_000, output_tokens: 0, total_tokens: 1_000_000, context_tokens: 5000, compaction_count: 0, sampled_at: 200 });
 
-    // Simulate what daemon does: record cost based on last two snapshots
+    // Simulate what daemon does: record cost via turn_records upsert
     const { getAllSnapshots } = await import('../src/core/db.js');
     const snaps = getAllSnapshots(db, 'main', 's1');
     assert.equal(snaps.length, 2, 'upsert must keep only 2 rows');
 
-    const prev = snaps[snaps.length - 2]!;
-    const curr = snaps[snaps.length - 1]!;
-    const inDelta = Math.max(0, curr.input_tokens - prev.input_tokens);
-    const outDelta = Math.max(0, curr.output_tokens - prev.output_tokens);
-    recordDailyCost(db, 'main', 's1', today, inDelta, outDelta, curr.model);
+    // Record turn once — a second identical upsert must not double-count
+    upsertTurnRecord(db, { agent: 'main', session_key: 's1', date: today, turn_index: 0, sampled_at: 200, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 1_000_000, output_tokens: 0, cache_read: 0, cache_write: 0, estimated_usd: 3 });
+    upsertTurnRecord(db, { agent: 'main', session_key: 's1', date: today, turn_index: 0, sampled_at: 200, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 1_000_000, output_tokens: 0, cache_read: 0, cache_write: 0, estimated_usd: 3 });
 
     const summary = getPeriodCost(db, 'main', 'day');
-    // 1M input tokens at claude-sonnet-4.5 = $3.00 (recorded once)
+    // 1M input tokens at claude-sonnet-4.5 = $3.00 (recorded once due to upsert)
     assert.equal(summary.totalUsd, 3, 'cost must be recorded exactly once');
   } finally {
     cleanupFixture(fixture);
@@ -147,13 +145,15 @@ test('duplicate file snapshot same second: token total not inflated in context a
   }
 });
 
-test('recordDailyCost and getPeriodCost aggregate daily usage', () => {
+test('upsertTurnRecord and getPeriodCost aggregate daily usage', () => {
   const fixture = createFixture();
   try {
     const db = openDb(fixture.probeDir);
     const today = todayString();
-    recordDailyCost(db, 'main', 'sess_1', today, 1_000_000, 0, 'anthropic/claude-sonnet-4.5');
-    recordDailyCost(db, 'main', 'sess_2', today, 0, 1_000_000, 'anthropic/claude-sonnet-4.5');
+    // sess_1: 1M input → $3.00 at claude-sonnet-4.5
+    upsertTurnRecord(db, { agent: 'main', session_key: 'sess_1', date: today, turn_index: 0, sampled_at: 100, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 1_000_000, output_tokens: 0, cache_read: 0, cache_write: 0, estimated_usd: 3 });
+    // sess_2: 1M output → $15.00 at claude-sonnet-4.5
+    upsertTurnRecord(db, { agent: 'main', session_key: 'sess_2', date: today, turn_index: 0, sampled_at: 200, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 0, output_tokens: 1_000_000, cache_read: 0, cache_write: 0, estimated_usd: 15 });
 
     const summary = getPeriodCost(db, 'main', 'day');
     assert.equal(summary.daily.length, 1);

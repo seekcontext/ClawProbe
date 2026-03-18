@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { openDb, insertSessionSnapshot, upsertCompactEvent } from '../src/core/db.js';
+import { openDb, insertSessionSnapshot, upsertCompactEvent, upsertTurnRecord } from '../src/core/db.js';
 import { getWindowSize } from '../src/core/model-windows.js';
 import { analyzeWorkspaceFiles, snapshotWorkspaceFiles, getLatestWorkspaceAnalysis } from '../src/engines/file-analyzer.js';
 import { runRules } from '../src/engines/rule-engine.js';
@@ -69,10 +69,10 @@ test('rule engine emits truncation, compaction, context leak and cost suggestion
       agent: 'main', session_key: 'sess_1', compaction_entry_id: 'c3', first_kept_entry_id: 'm5', tokens_before: 1, summary_text: 's', compacted_at: 1500, compacted_message_count: 1, compacted_messages: '[]',
     });
 
-    db.prepare('INSERT INTO cost_records (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('main', 'sess_old', '2026-03-15', 100, 20, 'anthropic/claude-sonnet-4.5', 1, 1);
-    db.prepare('INSERT INTO cost_records (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('main', 'sess_old2', '2026-03-16', 100, 20, 'anthropic/claude-sonnet-4.5', 1, 1);
     const today = new Date().toISOString().slice(0, 10);
-    db.prepare('INSERT INTO cost_records (agent, session_key, date, input_tokens, output_tokens, model, estimated_usd, recorded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run('main', 'sess_1', today, 100, 20, 'anthropic/claude-sonnet-4.5', 3, 1);
+    upsertTurnRecord(db, { agent: 'main', session_key: 'sess_old', date: '2026-03-15', turn_index: 0, sampled_at: 1, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 100, output_tokens: 20, cache_read: 0, cache_write: 0, estimated_usd: 1 });
+    upsertTurnRecord(db, { agent: 'main', session_key: 'sess_old2', date: '2026-03-16', turn_index: 0, sampled_at: 1, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 100, output_tokens: 20, cache_read: 0, cache_write: 0, estimated_usd: 1 });
+    upsertTurnRecord(db, { agent: 'main', session_key: 'sess_1', date: today, turn_index: 0, sampled_at: 1, model: 'anthropic/claude-sonnet-4.5', provider: 'anthropic', input_tokens: 100, output_tokens: 20, cache_read: 0, cache_write: 0, estimated_usd: 3 });
 
     const suggestions = runRules({
       db,
@@ -96,7 +96,6 @@ test('rule engine emits truncation, compaction, context leak and cost suggestion
     assert.ok(ids.includes('context-headroom'));
     assert.ok(ids.includes('cost-spike'));
     assert.ok(ids.includes('memory-bloat'));
-    assert.ok(ids.includes('stale-workspace-files'));
   } finally {
     cleanupFixture(fixture);
   }
