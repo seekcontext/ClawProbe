@@ -12,6 +12,7 @@ Token usage. API cost. Context health. Smart alerts. All in one place — withou
 [Why clawprobe](#why-clawprobe) •
 [Quick Start](#quick-start) •
 [Commands](#commands) •
+[`top` Live Dashboard](#clawprobe-top--live-dashboard) •
 [Agent Integration](#agent-integration) •
 [Configuration](#configuration) •
 [How It Works](#how-it-works)
@@ -27,6 +28,7 @@ clawprobe fixes that. It watches OpenClaw's files in the background and gives yo
 | Problem | clawprobe |
 |---------|-----------|
 | "Is my agent healthy right now?" | `clawprobe status` — one-glance dashboard |
+| "I want to keep watching it live" | `clawprobe top` — htop-style live dashboard |
 | "Why is context getting compacted so often?" | `clawprobe context` + `clawprobe suggest` |
 | "What did the agent forget after compaction?" | `clawprobe compacts` |
 | "What is this costing me?" | `clawprobe cost --week` with per-model pricing |
@@ -73,6 +75,52 @@ $ clawprobe status
 
   ⚠  Context window at 44% capacity
      → Consider starting a fresh session if nearing limit
+```
+
+---
+
+### `clawprobe top` — Live Dashboard
+
+An htop-style auto-refreshing view — fixed header, scrollable turn list, pinned alerts footer. Open it in a side terminal while your agent runs a long task.
+
+```
+clawprobe top  refreshing every 2s  (q / Ctrl+C to quit)     03/18/2026 17:42:35
+────────────────────────────────────────────────────────────────────────────────
+  Agent: main   ● daemon running
+  Session: agent:main:workspace:direct:xxx  ● active
+  Model:   moonshot/kimi-k2.5
+  Active:  Today 17:42   Compacts: 2
+────────────────────────────────────────────────────────────────────────────────
+  Context   ████████░░░░░░░░░░░░░░░░  44%   87.3K / 200.0K tokens
+  Headroom  112.7K tokens remaining (91%)
+────────────────────────────────────────────────────────────────────────────────
+  Session cost  $0.52        Input   859.2K tok      Output   29.8K tok
+  Today total   $0.67        Cache read   712.0K tok
+────────────────────────────────────────────────────────────────────────────────
+  Recent turns
+  Turn  Time      ΔInput   ΔOutput  Cost          Note
+  27    17:42     22.0K    908      $0.0094        ← latest
+  26    17:19     990      630      $0.0026
+  25    17:19     20.4K    661      $0.0094
+  24    15:57     564      39       $0.0014
+  23    15:56     18.8K    231      $0.0076        ◆ compact
+  …                            (fills terminal height)
+────────────────────────────────────────────────────────────────────────────────
+  🟡  Context window at 44% capacity
+     → Consider starting a fresh session or manually compacting now
+  Costs are estimates based on public pricing.
+```
+
+- **Fixed header** — agent info, context bar, and cost summary always visible
+- **Scrollable turns** — fills available terminal height, newest turn on top
+- **Pinned footer** — active alerts always visible at the bottom
+- **Alternate screen** — exits cleanly, restores your terminal (like `htop`/`vim`)
+- `q` or `Ctrl+C` to quit
+
+```bash
+clawprobe top                  # default 2s refresh
+clawprobe top --interval 5     # custom refresh rate
+clawprobe top --agent coder    # target a specific agent
 ```
 
 ---
