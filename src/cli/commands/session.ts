@@ -232,7 +232,7 @@ export async function runSession(
   } else if (cost.inputTokens > 0) {
     console.log(`    Context now:  ${fmtTokens(cost.inputTokens)} tokens  ${severity.muted("(last turn input)")}`);
   }
-  console.log(`    Output total: ${fmtTokens(cost.outputTokens)} tokens    ${fmtUsd(estimateCost({ input: 0, output: cost.outputTokens }, cost.model, customPrices))}`);
+  console.log(`    Output total: ${fmtTokens(cost.outputTokens)} tokens    ${fmtUsd(cost.estimatedUsd)}`);
 
   const showTurns = opts.turns !== false && cost.turns.length > 0;
   if (showTurns) {

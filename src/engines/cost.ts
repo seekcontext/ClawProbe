@@ -240,12 +240,12 @@ export function getSessionCostFromJsonl(
     timestamp: t.timestamp,
     inputTokensDelta: t.usage.input,   // context size at this turn
     outputTokensDelta: t.usage.output, // incremental output tokens
-    estimatedUsd: estimateCost({ input: t.usage.output, output: t.usage.output }, model, customPrices),
+    estimatedUsd: estimateCost({ input: t.usage.input, output: t.usage.output }, model, customPrices),
     compactOccurred: false,
   }));
 
-  // Cost is based on cumulative output (input is context, not newly sent content each turn)
-  const totalUsd = estimateCost({ input: 0, output: stats.totalOutput }, model, customPrices);
+  // Total cost = sum of per-turn costs (each turn bills its own input context + output)
+  const totalUsd = turns.reduce((s, t) => s + t.estimatedUsd, 0);
 
   return {
     sessionKey,
