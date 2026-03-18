@@ -227,7 +227,7 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
   }
 
   lines.push("");
-  lines.push(chalk.dim(`  Costs are estimates based on public pricing.  Last refresh: ${nowStr()}`));
+  lines.push(chalk.dim("  Costs are estimates based on public pricing."));
 
   flushLines(lines);
 }
