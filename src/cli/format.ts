@@ -217,10 +217,19 @@ export function printCostDisclaimer(): void {
   console.log(severity.muted("  Costs are estimates based on public pricing. Verify with your provider's billing dashboard."));
 }
 
-// --- JSON output helper ---
+// --- JSON output helpers ---
 
 export function outputJson(data: unknown): void {
   console.log(JSON.stringify(data, null, 2));
+}
+
+/**
+ * Output a machine-readable error when --json mode is active, then exit.
+ * Always writes to stdout so agents can parse a single stream.
+ */
+export function outputJsonError(code: string, message: string, exitCode = 1): never {
+  console.log(JSON.stringify({ ok: false, error: code, message }, null, 2));
+  process.exit(exitCode);
 }
 
 // --- Error ---

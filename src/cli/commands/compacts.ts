@@ -2,7 +2,7 @@ import path from "path";
 import { ResolvedConfig } from "../../core/config.js";
 import { openDb, getCompactEvents, getCompactEventById } from "../../core/db.js";
 import { saveCompactedMessages } from "../../core/memory-editor.js";
-import { header, fmtDate, fmtTokens, roleIcon, outputJson, severity, divider, printSuccess, printError } from "../format.js";
+import { header, fmtDate, fmtTokens, roleIcon, outputJson, outputJsonError, severity, divider, printSuccess, printError } from "../format.js";
 import type { MessageEntry } from "../../core/jsonl-parser.js";
 
 interface CompactsOptions {
@@ -22,11 +22,13 @@ export async function runCompacts(cfg: ResolvedConfig, opts: CompactsOptions): P
   if (opts.save !== undefined) {
     const compactId = parseInt(opts.save, 10);
     if (isNaN(compactId)) {
+      if (opts.json) outputJsonError("invalid_id", `Invalid compact ID: ${opts.save}`);
       printError(`Invalid compact ID: ${opts.save}`);
       process.exit(1);
     }
     const event = getCompactEventById(db, compactId);
     if (!event) {
+      if (opts.json) outputJsonError("not_found", `Compact event #${compactId} not found.`);
       printError(`Compact event #${compactId} not found.`);
       process.exit(1);
     }

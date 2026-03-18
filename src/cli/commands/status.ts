@@ -8,7 +8,7 @@ import { parseSessionStats } from "../../core/jsonl-parser.js";
 import { getPeriodCost } from "../../engines/cost.js";
 import { runRules, persistSuggestions, type ProbeState } from "../../engines/rule-engine.js";
 import {
-  header, fmtTokens, fmtDate, fmtUsd, tokenBar, outputJson, printError, severity,
+  header, fmtTokens, fmtDate, fmtUsd, tokenBar, outputJson, severity,
   getWindowSize,
 } from "../format.js";
 
@@ -94,7 +94,13 @@ export async function runStatus(cfg: ResolvedConfig, opts: StatusOptions): Promi
       lastActiveAt,
       isActive,
       todayUsd: todaySummary.totalUsd,
-      suggestions: suggestions.map((s) => ({ severity: s.severity, title: s.title })),
+      suggestions: suggestions.map((s) => ({
+        severity: s.severity,
+        ruleId: s.ruleId,
+        title: s.title,
+        detail: s.detail,
+        action: s.action ?? null,
+      })),
     });
     return;
   }

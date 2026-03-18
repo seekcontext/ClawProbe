@@ -104,6 +104,10 @@ export interface PeriodCostSummary {
   totalUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /** Tokens served from prompt cache (billed at a discounted rate) */
+  cacheReadTokens: number;
+  /** Tokens written to prompt cache */
+  cacheWriteTokens: number;
   /** Cost attributable to input tokens (computed at actual per-model rates) */
   inputUsd: number;
   /** Cost attributable to output tokens (computed at actual per-model rates) */
@@ -477,11 +481,13 @@ export function getPeriodCost(
     outputTokens: entry.output,
   })).sort((a, b) => a.date.localeCompare(b.date));
 
-  const totalUsd    = daily.reduce((s, d) => s + d.usd, 0);
-  const totalInput  = daily.reduce((s, d) => s + d.inputTokens, 0);
-  const totalOutput = daily.reduce((s, d) => s + d.outputTokens, 0);
-  const totalInputUsd  = [...byDate.values()].reduce((s, e) => s + e.inputUsd, 0);
-  const totalOutputUsd = [...byDate.values()].reduce((s, e) => s + e.outputUsd, 0);
+  const totalUsd        = daily.reduce((s, d) => s + d.usd, 0);
+  const totalInput      = daily.reduce((s, d) => s + d.inputTokens, 0);
+  const totalOutput     = daily.reduce((s, d) => s + d.outputTokens, 0);
+  const totalCacheRead  = [...byDate.values()].reduce((s, e) => s + e.cacheRead, 0);
+  const totalCacheWrite = [...byDate.values()].reduce((s, e) => s + e.cacheWrite, 0);
+  const totalInputUsd   = [...byDate.values()].reduce((s, e) => s + e.inputUsd, 0);
+  const totalOutputUsd  = [...byDate.values()].reduce((s, e) => s + e.outputUsd, 0);
   // Use the full window span (not just active days) so monthEstimate reflects
   // true average spend including idle days.
   // For "all" period there's no fixed window, fall back to actual active days.
@@ -495,6 +501,8 @@ export function getPeriodCost(
     totalUsd,
     inputTokens: totalInput,
     outputTokens: totalOutput,
+    cacheReadTokens: totalCacheRead,
+    cacheWriteTokens: totalCacheWrite,
     inputUsd: totalInputUsd,
     outputUsd: totalOutputUsd,
     dailyAvg,

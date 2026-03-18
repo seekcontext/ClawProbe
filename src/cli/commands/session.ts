@@ -10,7 +10,7 @@ import {
 import chalk from "chalk";
 import {
   header, fmtUsd, fmtTokens, fmtDate, fmtDuration, makeTable, computeColWidths, outputJson,
-  severity, printCostDisclaimer,
+  outputJsonError, severity, printCostDisclaimer,
 } from "../format.js";
 
 interface SessionOptions {
@@ -194,6 +194,7 @@ export async function runSession(
   if (!targetKey) {
     const active = getActiveSession(cfg.sessionsDir);
     if (!active) {
+      if (opts.json) outputJsonError("no_active_session", "No active session found. Ensure OpenClaw is running.");
       console.error(severity.critical("No active session found. Pass a session key or ensure OpenClaw is running."));
       process.exit(1);
     }
@@ -202,6 +203,7 @@ export async function runSession(
 
   const cost = loadSessionCost(cfg.sessionsDir, targetKey, customPrices);
   if (!cost) {
+    if (opts.json) outputJsonError("session_not_found", `No data found for session: ${targetKey}`);
     console.error(severity.critical(`No data found for session: ${targetKey}`));
     console.log(severity.muted("  Ensure OpenClaw is running and has written a transcript."));
     process.exit(1);

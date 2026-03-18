@@ -11,6 +11,7 @@ import { runStatus } from "./cli/commands/status.js";
 import { runCost } from "./cli/commands/cost.js";
 import { runSession } from "./cli/commands/session.js";
 import { runCompacts } from "./cli/commands/compacts.js";
+import { runSchema } from "./cli/commands/schema.js";
 import { runContext } from "./cli/commands/context.js";
 import { runSuggest } from "./cli/commands/suggest.js";
 
@@ -364,6 +365,14 @@ program
         console.log(`\n  daemon.log not found at ${daemonLog}`);
       }
     }
+  });
+
+// --- schema ---
+program
+  .command("schema [command]")
+  .description("Show the --json output schema for a command (for agent/tool integration)")
+  .action((commandName?: string) => {
+    runSchema(commandName);
   });
 
 program.parse(process.argv);
