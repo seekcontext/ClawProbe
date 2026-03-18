@@ -340,6 +340,26 @@ export function getDailyCostSummary(
   `).all(agent, cutoff) as unknown as { date: string; total_usd: number; input_tokens: number; output_tokens: number }[];
 }
 
+/**
+ * Returns the raw per-session cost rows for a date range, including model name.
+ * Used by getPeriodCost to recompute USD from live price table rather than
+ * relying on the stored estimated_usd (which may have been recorded before
+ * prices were available).
+ */
+export function getDailyCostRows(
+  db: DatabaseSync,
+  agent: string,
+  days: number
+): { date: string; session_key: string; model: string | null; input_tokens: number; output_tokens: number; estimated_usd: number }[] {
+  const cutoff = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
+  return db.prepare(`
+    SELECT date, session_key, model, input_tokens, output_tokens, estimated_usd
+    FROM cost_records
+    WHERE agent = ? AND date >= ?
+    ORDER BY date ASC
+  `).all(agent, cutoff) as unknown as { date: string; session_key: string; model: string | null; input_tokens: number; output_tokens: number; estimated_usd: number }[];
+}
+
 // --- Compact Events ---
 
 export function upsertCompactEvent(

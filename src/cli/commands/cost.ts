@@ -75,5 +75,11 @@ export async function runCost(cfg: ResolvedConfig, opts: CostOptions): Promise<v
     }
   }
 
+  if (summary.unpricedModels && summary.unpricedModels.length > 0) {
+    console.log();
+    console.log(severity.muted(`  ℹ No price data for: ${summary.unpricedModels.join(", ")}`));
+    console.log(severity.muted(`    Add to ~/.clawprobe/config.json → cost.customPrices to enable cost tracking.`));
+  }
+
   console.log();
 }

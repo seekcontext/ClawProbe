@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import {
-  getDailyCostSummary,
+  getDailyCostRows,
   getAllSessionKeys,
   getFirstSnapshot,
   getLatestSnapshot,
@@ -79,6 +79,8 @@ export interface PeriodCostSummary {
   monthEstimate: number;
   daily: DailyCost[];
   model?: string;
+  /** Model names found in DB that had no matching price entry */
+  unpricedModels?: string[];
 }
 
 export interface SessionCost {
@@ -313,14 +315,55 @@ export function getPeriodCost(
       break;
   }
 
-  const rows = getDailyCostSummary(db, agent, days);
+  // Use per-row data to recompute USD from the live price table.
+  // This ensures historical records stored with estimated_usd=0 (recorded before
+  // model prices were available) are displayed correctly without a DB migration.
+  const rawRows = getDailyCostRows(db, agent, days);
+  const prices = { ...MODEL_PRICES, ...customPrices };
 
-  const daily: DailyCost[] = rows.map((r) => ({
-    date: r.date,
-    usd: r.total_usd,
-    inputTokens: r.input_tokens,
-    outputTokens: r.output_tokens,
-  }));
+  const byDate = new Map<string, { usd: number; input: number; output: number; unpriced: string[] }>();
+  for (const row of rawRows) {
+    let entry = byDate.get(row.date);
+    if (!entry) {
+      entry = { usd: 0, input: 0, output: 0, unpriced: [] };
+      byDate.set(row.date, entry);
+    }
+    entry.input += row.input_tokens;
+    entry.output += row.output_tokens;
+
+    if (row.model) {
+      const recomputed = estimateCost(
+        { input: row.input_tokens, output: row.output_tokens },
+        row.model,
+        customPrices
+      );
+      if (recomputed > 0) {
+        entry.usd += recomputed;
+      } else {
+        // Price not found for this model — fall back to stored value
+        entry.usd += row.estimated_usd;
+        if (!entry.unpriced.includes(row.model)) entry.unpriced.push(row.model);
+      }
+    } else {
+      entry.usd += row.estimated_usd;
+    }
+  }
+
+  // Collect models with no price match for display hints
+  const unpricedModels = new Set<string>();
+  for (const entry of byDate.values()) {
+    entry.unpriced.forEach((m) => unpricedModels.add(m));
+  }
+
+  const daily: DailyCost[] = [...byDate.entries()].map(([date, entry]) => ({
+    date,
+    usd: entry.usd,
+    inputTokens: entry.input,
+    outputTokens: entry.output,
+  })).sort((a, b) => a.date.localeCompare(b.date));
+
+  // Suppress unused-variable warning — prices is used inside estimateCost call above
+  void prices;
 
   const totalUsd = daily.reduce((s, d) => s + d.usd, 0);
   const totalInput = daily.reduce((s, d) => s + d.inputTokens, 0);
@@ -338,6 +381,7 @@ export function getPeriodCost(
     dailyAvg,
     monthEstimate: dailyAvg * 30,
     daily,
+    unpricedModels: unpricedModels.size > 0 ? [...unpricedModels] : undefined,
   };
 }
 
