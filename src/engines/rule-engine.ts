@@ -2,6 +2,8 @@ import fs from "fs";
 import { DatabaseSync } from "node:sqlite";
 import { getCompactEvents, getSuggestions, upsertSuggestion, removeSuggestion, getDailyCostSummary } from "../core/db.js";
 import { getWindowSize } from "../core/model-windows.js";
+import { parseSessionStats } from "../core/jsonl-parser.js";
+import { findJsonlPath, getActiveSession } from "../core/session-store.js";
 import { analyzeWorkspaceFiles, getFileStaleness } from "./file-analyzer.js";
 import { ProbeConfig } from "../core/config.js";
 
@@ -97,19 +99,28 @@ const HighCompactionFrequencyRule: Rule = {
 const ContextLeakRule: Rule = {
   id: "context-headroom",
   name: "Context Window Nearly Full",
-  check({ db, agent }) {
-    // Find the most recent snapshot across all sessions
+  check({ db, agent, sessionsDir }) {
+    const activeSession = getActiveSession(sessionsDir);
+    if (!activeSession) return null;
+
+    const transcriptPath = findJsonlPath(sessionsDir, activeSession);
+    const jsonlStats = transcriptPath ? parseSessionStats(transcriptPath) : null;
+
+    // Fall back to the snapshot only for model/provider metadata.
     const snapshot = (db.prepare(`
       SELECT * FROM session_snapshots
-      WHERE agent = ?
+      WHERE agent = ? AND session_key = ?
       ORDER BY sampled_at DESC
       LIMIT 1
-    `).get(agent)) as import("../core/db.js").SessionSnapshotRow | undefined;
+    `).get(agent, activeSession.sessionKey)) as import("../core/db.js").SessionSnapshotRow | undefined;
 
-    if (!snapshot) return null;
+    const currentTokens = jsonlStats?.lastTotalTokens ?? activeSession.sessionTokens;
+    if (currentTokens <= 0) return null;
 
-    const windowSize = getWindowSize(snapshot.model, snapshot.context_tokens);
-    const utilization = snapshot.context_tokens / windowSize;
+    const configuredWindowSize = activeSession.windowSize || activeSession.contextTokens;
+    const model = jsonlStats?.model ?? activeSession.modelOverride ?? snapshot?.model ?? null;
+    const windowSize = getWindowSize(model, configuredWindowSize || currentTokens);
+    const utilization = currentTokens / windowSize;
 
     if (utilization < 0.9) return null;
 
@@ -118,7 +129,7 @@ const ContextLeakRule: Rule = {
       severity: "warning",
       title: `Context window at ${Math.round(utilization * 100)}% capacity`,
       detail:
-        `Current context is ${snapshot.context_tokens.toLocaleString()} tokens ` +
+        `Current context is ${currentTokens.toLocaleString()} tokens ` +
         `out of ~${windowSize.toLocaleString()} (${Math.round(utilization * 100)}%). ` +
         `Compaction may trigger soon, potentially losing important context.`,
       action: "Consider starting a fresh session or manually compacting now",

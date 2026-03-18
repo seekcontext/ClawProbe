@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { openDb, insertSessionSnapshot, resetDb } from '../src/core/db.js';
-import { createFixture, cleanupFixture, runCli, writeOpenClawConfig, writeSessionsJson } from './helpers.js';
+import { createFixture, cleanupFixture, runCli, writeOpenClawConfig, writeSessionsJson, writeTranscript } from './helpers.js';
 
 test('CLI config --json resolves OpenClaw paths', () => {
   const fixture = createFixture();
@@ -30,6 +30,7 @@ test('CLI session --json returns per-session cost breakdown', () => {
       sessions: {
         sess_1: {
           sessionId: 'sess_1',
+          sessionFile: 'sess_1.jsonl',
           updatedAt: 220,
           inputTokens: 6000,
           outputTokens: 800,
@@ -41,6 +42,56 @@ test('CLI session --json returns per-session cost breakdown', () => {
         },
       },
     });
+    writeTranscript(fixture, 'sess_1', [
+      { type: 'session', id: 'sess_1', cwd: fixture.workspaceDir, timestamp: 1000 },
+      {
+        type: 'message',
+        timestamp: 1000,
+        message: {
+          id: 'u1',
+          parentId: 'sess_1',
+          role: 'user',
+          content: [{ type: 'text', text: 'hello' }],
+        },
+      },
+      {
+        type: 'message',
+        timestamp: 160000,
+        message: {
+          id: 'a1',
+          parentId: 'u1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'world' }],
+          model: 'anthropic/claude-sonnet-4.5',
+          provider: 'anthropic',
+          usage: { input: 1000, output: 200, cacheRead: 0, cacheWrite: 0, totalTokens: 1500 },
+          timestamp: 160000,
+        },
+      },
+      {
+        type: 'compaction',
+        id: 'c1',
+        parentId: 'a1',
+        firstKeptEntryId: 'a1',
+        tokensBefore: 5000,
+        content: 'summary',
+        timestamp: 200000,
+      },
+      {
+        type: 'message',
+        timestamp: 220000,
+        message: {
+          id: 'a2',
+          parentId: 'a1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          model: 'anthropic/claude-sonnet-4.5',
+          provider: 'anthropic',
+          usage: { input: 6000, output: 600, cacheRead: 0, cacheWrite: 0, totalTokens: 190000 },
+          timestamp: 220000,
+        },
+      },
+    ]);
 
     const db = openDb(fixture.probeDir);
     insertSessionSnapshot(db, {
@@ -66,7 +117,7 @@ test('CLI session --json returns per-session cost breakdown', () => {
     assert.equal(parsed.outputTokens, 800);
     assert.equal(parsed.compactionCount, 1);
     assert.equal(parsed.turns.length, 2);
-    assert.equal(parsed.turns[1].compactOccurred, true);
+    assert.equal(parsed.turns[1].compactOccurred, false);
   } finally {
     cleanupFixture(fixture);
   }

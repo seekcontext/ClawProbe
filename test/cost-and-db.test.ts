@@ -153,7 +153,7 @@ test('recordDailyCost and getPeriodCost aggregate daily usage', () => {
     const db = openDb(fixture.probeDir);
     const today = todayString();
     recordDailyCost(db, 'main', 'sess_1', today, 1_000_000, 0, 'anthropic/claude-sonnet-4.5');
-    recordDailyCost(db, 'main', 'sess_1', today, 0, 1_000_000, 'anthropic/claude-sonnet-4.5');
+    recordDailyCost(db, 'main', 'sess_2', today, 0, 1_000_000, 'anthropic/claude-sonnet-4.5');
 
     const summary = getPeriodCost(db, 'main', 'day');
     assert.equal(summary.daily.length, 1);

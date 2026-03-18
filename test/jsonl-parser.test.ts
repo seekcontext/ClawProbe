@@ -9,9 +9,36 @@ test('parseAll finds compact events and compacted messages', () => {
   try {
     const transcript = writeTranscript(fixture, 'sess_1', [
       { type: 'session', id: 's1', cwd: '/tmp', timestamp: 1 },
-      { type: 'message', id: 'm1', parentId: 's1', role: 'user', content: 'Prefer PostgreSQL over MySQL' },
-      { type: 'message', id: 'm2', parentId: 'm1', role: 'assistant', content: 'Will do.' },
-      { type: 'message', id: 'm3', parentId: 'm2', role: 'user', content: 'Use snake_case for API responses' },
+      {
+        type: 'message',
+        timestamp: 2,
+        message: {
+          id: 'm1',
+          parentId: 's1',
+          role: 'user',
+          content: [{ type: 'text', text: 'Prefer PostgreSQL over MySQL' }],
+        },
+      },
+      {
+        type: 'message',
+        timestamp: 3,
+        message: {
+          id: 'm2',
+          parentId: 'm1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'Will do.' }],
+        },
+      },
+      {
+        type: 'message',
+        timestamp: 4,
+        message: {
+          id: 'm3',
+          parentId: 'm2',
+          role: 'user',
+          content: [{ type: 'text', text: 'Use snake_case for API responses' }],
+        },
+      },
       { type: 'compaction', id: 'c1', parentId: 'm3', firstKeptEntryId: 'm3', tokensBefore: 12345, content: 'User is building an API', timestamp: 10 },
     ]);
 
@@ -34,17 +61,35 @@ test('parseIncremental only returns appended entries', async () => {
   try {
     const transcript = writeTranscript(fixture, 'sess_2', [
       { type: 'session', id: 's1', cwd: '/tmp', timestamp: 1 },
-      { type: 'message', id: 'm1', parentId: 's1', role: 'user', content: 'hello' },
+      {
+        type: 'message',
+        timestamp: 2,
+        message: {
+          id: 'm1',
+          parentId: 's1',
+          role: 'user',
+          content: [{ type: 'text', text: 'hello' }],
+        },
+      },
     ]);
 
     const first = parseIncremental(transcript);
     assert.equal(first.entries.length, 2);
 
     const fs = await import('node:fs');
-    fs.appendFileSync(transcript, JSON.stringify({ type: 'message', id: 'm2', parentId: 'm1', role: 'assistant', content: 'world' }) + '\n');
+    fs.appendFileSync(transcript, JSON.stringify({
+      type: 'message',
+      timestamp: 3,
+      message: {
+        id: 'm2',
+        parentId: 'm1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'world' }],
+      },
+    }) + '\n');
     const second = parseIncremental(transcript);
     assert.equal(second.entries.length, 1);
-    assert.equal((second.entries[0] as { id: string }).id, 'm2');
+    assert.equal(((second.entries[0] as { message?: { id?: string } }).message?.id), 'm2');
 
     resetCursor(transcript);
     const reset = parseIncremental(transcript);
