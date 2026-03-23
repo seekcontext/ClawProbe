@@ -1,7 +1,7 @@
 # clawprobe User Manual
 
-> Version 0.1  
-> For OpenClaw users who want full visibility into their agent's context, costs, and memory.
+> Version 1.0  
+> For OpenClaw users who want full visibility into their agent's context, costs, tool usage, todos, and memory.
 
 ---
 
@@ -112,17 +112,15 @@ clawprobe stop
 
 ### What clawprobe reads
 
-clawprobe reads these OpenClaw files (it never modifies them, except when you explicitly run `memory add/edit/delete`):
+clawprobe reads these OpenClaw files (it never modifies them):
 
 | File | What clawprobe does with it |
 |------|-----------------------------|
 | `~/.openclaw/agents/main/sessions/sessions.json` | Token counts, compaction stats, model info |
-| `~/.openclaw/agents/main/sessions/<sessionKey>.jsonl` | Transcript parsing, compact event detection |
+| `~/.openclaw/agents/main/sessions/<sessionKey>.jsonl` | Transcript parsing: turns, tools, todos, sub-agents, compact events |
 | `~/.openclaw/openclaw.json` | Config detection (model, workspace path, etc.) |
 | `~/.openclaw/workspace/TOOLS.md` | Size and truncation analysis |
-| `~/.openclaw/workspace/MEMORY.md` | Memory browser and editor |
-| `~/.openclaw/workspace/memory/YYYY-MM-DD.md` | Daily notes browser |
-| `~/.openclaw/memory/<agentId>.sqlite` | Semantic memory search (read-only) |
+| `~/.openclaw/workspace/MEMORY.md` | Memory bloat detection |
 
 ### Where clawprobe stores its data
 
@@ -131,6 +129,9 @@ clawprobe keeps its own database at `~/.clawprobe/probe.db`. This is a SQLite fi
 - Parsed compact events and their content
 - File size history
 - Generated optimization suggestions
+- Per-session tool usage statistics
+- Todo list snapshots
+- Sub-agent invocation records
 
 This file is **never shared with any external service**.
 
@@ -1091,7 +1092,7 @@ Options:
 
 ### clawprobe compacts
 
-Show compact events.
+Show compact events and optionally archive compacted messages.
 
 ```
 clawprobe compacts [options]
@@ -1101,24 +1102,28 @@ Options:
   --agent <name>      Target agent
   --session <key>     Target session
   --show-messages     Show full message content
+  --save <id>         Save compacted messages from event <id> to a memory file
+  --file <path>       Target file for --save (default: MEMORY.md in workspace)
   --json              JSON output
 ```
 
-### clawprobe memory
+**Example:**
 
-Memory management subcommands.
+```bash
+clawprobe compacts --save 3                              # Save to MEMORY.md
+clawprobe compacts --save 3 --file notes/archive.md     # Save to custom file
+```
+
+### clawprobe memory (removed)
+
+The standalone `memory` subcommand has been removed. Use `clawprobe compacts --save <id>` to archive compacted messages to a memory file.
 
 ```
-clawprobe memory list [options]
-  --file <path>       Target file (default: MEMORY.md)
-  --agent <name>      Target agent
+# Old: clawprobe memory add <content>
+# Use: edit MEMORY.md directly in your workspace
 
-clawprobe memory search <query> [options]
-  --agent <name>      Target agent
-  --limit <n>         Max results (default: 10)
-
-clawprobe memory add <content> [options]
-  --file <path>       Target file (default: MEMORY.md)
+# Old: clawprobe memory list
+# Use: clawprobe memory add <content> — edit MEMORY.md directly
   --agent <name>      Target agent
 
 clawprobe memory edit <entry-id> [content] [options]
@@ -1138,7 +1143,7 @@ clawprobe memory save-compact <compact-id> [options]
 
 ### clawprobe session
 
-Show per-session cost breakdown and turn-level timeline.
+Show per-session cost breakdown, turn timeline, tool usage, todo progress, and sub-agents.
 
 ```
 clawprobe session [session-key] [options]
@@ -1147,21 +1152,25 @@ Arguments:
   session-key         Session to inspect (default: currently active session)
 
 Options:
-  --list              List all sessions with summary cost info
+  --list              List all sessions (shows human-readable names when available)
+  --full              Show full session keys in list (no truncation)
   --turns             Show turn-by-turn cost timeline (default: true)
   --no-turns          Hide turn timeline (summary only)
+  --todos             Show todo list section (default: true)
+  --no-todos          Hide todo list section
   --agent <name>      Target agent
-  --json              JSON output
+  --json              JSON output (includes toolStats, todos, agents)
 ```
 
 **Examples:**
 
 ```bash
-clawprobe session                    # Active session summary + turn timeline
-clawprobe session --list             # All sessions table
+clawprobe session                    # Active session: turns + tools + todos + sub-agents
+clawprobe session --list             # All sessions (human-readable names preferred)
 clawprobe session sess_abc123        # Specific session by key
 clawprobe session sess_abc123 --json # JSON output for scripting
 clawprobe session --no-turns         # Summary only (no turn timeline)
+clawprobe session --no-todos         # Hide todo section
 ```
 
 **JSON output schema:**

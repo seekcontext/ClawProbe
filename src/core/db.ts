@@ -91,6 +91,36 @@ export interface SuggestionRow {
   dismissed: number;
 }
 
+export interface ToolStatRow {
+  id: number;
+  agent: string;
+  session_key: string;
+  tool_name: string;
+  call_count: number;
+  error_count: number;
+  sampled_at: number;
+}
+
+export interface TodoSnapshotRow {
+  id: number;
+  agent: string;
+  session_key: string;
+  /** JSON array of TodoItem */
+  todos_json: string;
+  sampled_at: number;
+}
+
+export interface AgentStatRow {
+  id: number;
+  agent: string;
+  session_key: string;
+  sub_id: string;
+  sub_type: string;
+  model: string | null;
+  description: string | null;
+  sampled_at: number;
+}
+
 // ---------------------------------------------------------------------------
 // Schema  (v0.5 — replaces cost_records with turn_records)
 // ---------------------------------------------------------------------------
@@ -182,6 +212,47 @@ CREATE TABLE IF NOT EXISTS suggestions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sg_agent_rule ON suggestions(agent, rule_id, dismissed);
+
+CREATE TABLE IF NOT EXISTS tool_stats (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent       TEXT    NOT NULL,
+  session_key TEXT    NOT NULL,
+  tool_name   TEXT    NOT NULL,
+  call_count  INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  sampled_at  INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tst_agent_session_tool
+  ON tool_stats(agent, session_key, tool_name);
+
+CREATE TABLE IF NOT EXISTS todo_snapshots (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent       TEXT    NOT NULL,
+  session_key TEXT    NOT NULL,
+  todos_json  TEXT    NOT NULL,
+  sampled_at  INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_td_agent_session
+  ON todo_snapshots(agent, session_key);
+
+CREATE TABLE IF NOT EXISTS agent_stats (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent       TEXT    NOT NULL,
+  session_key TEXT    NOT NULL,
+  sub_id      TEXT    NOT NULL,
+  sub_type    TEXT    NOT NULL,
+  model       TEXT,
+  description TEXT,
+  sampled_at  INTEGER NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ag_sub_id
+  ON agent_stats(sub_id);
+
+CREATE INDEX IF NOT EXISTS idx_ag_agent_session
+  ON agent_stats(agent, session_key);
 `;
 
 // ---------------------------------------------------------------------------
@@ -540,4 +611,102 @@ export function removeSuggestion(
   ruleId: string
 ): void {
   db.prepare(`DELETE FROM suggestions WHERE agent = ? AND rule_id = ?`).run(agent, ruleId);
+}
+
+// ---------------------------------------------------------------------------
+// Tool Stats
+// ---------------------------------------------------------------------------
+
+export function upsertToolStats(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string,
+  toolName: string,
+  callCount: number,
+  errorCount: number,
+  sampledAt: number
+): void {
+  db.prepare(`
+    INSERT INTO tool_stats (agent, session_key, tool_name, call_count, error_count, sampled_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(agent, session_key, tool_name) DO UPDATE SET
+      call_count  = excluded.call_count,
+      error_count = excluded.error_count,
+      sampled_at  = excluded.sampled_at
+  `).run(agent, sessionKey, toolName, callCount, errorCount, sampledAt);
+}
+
+export function getToolStats(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string
+): ToolStatRow[] {
+  return db.prepare(`
+    SELECT * FROM tool_stats
+    WHERE agent = ? AND session_key = ?
+    ORDER BY call_count DESC
+  `).all(agent, sessionKey) as unknown as ToolStatRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Todo Snapshots
+// ---------------------------------------------------------------------------
+
+export function upsertTodoSnapshot(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string,
+  todosJson: string,
+  sampledAt: number
+): void {
+  db.prepare(`
+    INSERT INTO todo_snapshots (agent, session_key, todos_json, sampled_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(agent, session_key) DO UPDATE SET
+      todos_json = excluded.todos_json,
+      sampled_at = excluded.sampled_at
+  `).run(agent, sessionKey, todosJson, sampledAt);
+}
+
+export function getTodoSnapshot(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string
+): TodoSnapshotRow | undefined {
+  return db.prepare(`
+    SELECT * FROM todo_snapshots WHERE agent = ? AND session_key = ?
+  `).get(agent, sessionKey) as unknown as TodoSnapshotRow | undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Agent Stats (sub-agent invocations)
+// ---------------------------------------------------------------------------
+
+export function upsertAgentStat(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string,
+  row: { sub_id: string; sub_type: string; model: string | null; description: string | null; sampled_at: number }
+): void {
+  db.prepare(`
+    INSERT INTO agent_stats (agent, session_key, sub_id, sub_type, model, description, sampled_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(sub_id) DO UPDATE SET
+      sub_type    = excluded.sub_type,
+      model       = excluded.model,
+      description = excluded.description,
+      sampled_at  = excluded.sampled_at
+  `).run(agent, sessionKey, row.sub_id, row.sub_type, row.model, row.description, row.sampled_at);
+}
+
+export function getAgentStats(
+  db: DatabaseSync,
+  agent: string,
+  sessionKey: string
+): AgentStatRow[] {
+  return db.prepare(`
+    SELECT * FROM agent_stats
+    WHERE agent = ? AND session_key = ?
+    ORDER BY sampled_at ASC
+  `).all(agent, sessionKey) as unknown as AgentStatRow[];
 }

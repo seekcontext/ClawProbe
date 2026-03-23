@@ -2,7 +2,8 @@ import path from "path";
 import fs from "fs";
 import { ResolvedConfig } from "../../core/config.js";
 import { getActiveSession, readSessionsStore, listJsonlFiles, sessionKeyFromPath, findJsonlPath } from "../../core/session-store.js";
-import { parseSessionStats } from "../../core/jsonl-parser.js";
+import { parseSessionStats, type ToolStat, type TodoItem, type AgentStat } from "../../core/jsonl-parser.js";
+import { openDb, getToolStats, getTodoSnapshot, getAgentStats } from "../../core/db.js";
 import {
   getSessionCostFromJsonl, estimateCost, sessionCostFromEntry,
   type SessionCost,
@@ -17,6 +18,7 @@ interface SessionOptions {
   agent?: string;
   list?: boolean;
   turns?: boolean;
+  todos?: boolean;
   json?: boolean;
   full?: boolean;
 }
@@ -98,6 +100,59 @@ function discoverAllSessions(
   return costs.sort((a, b) => b.lastActiveAt - a.lastActiveAt);
 }
 
+function renderToolStats(toolStats: ToolStat[]): void {
+  if (toolStats.length === 0) return;
+  console.log();
+  console.log(severity.bold("  Tool usage:"));
+  console.log();
+  for (const tool of toolStats) {
+    const errStr = tool.errorCount > 0
+      ? severity.warning(`  ${tool.errorCount} err`)
+      : "";
+    console.log(
+      `    ${tool.name.padEnd(24)} ${String(tool.callCount).padStart(4)} call${tool.callCount !== 1 ? "s" : ""}${errStr}`
+    );
+  }
+}
+
+function renderTodos(todos: TodoItem[]): void {
+  if (todos.length === 0) return;
+  console.log();
+  console.log(severity.bold("  Todo list:"));
+  console.log();
+  for (const todo of todos) {
+    let icon: string;
+    let label: string;
+    if (todo.status === "completed") {
+      icon = chalk.green("✓");
+      label = chalk.dim(todo.content);
+    } else if (todo.status === "in_progress") {
+      icon = chalk.yellow("→");
+      label = todo.content;
+    } else {
+      icon = chalk.dim("○");
+      label = chalk.dim(todo.content);
+    }
+    console.log(`    ${icon}  ${label}`);
+  }
+  const done = todos.filter(t => t.status === "completed").length;
+  const inprog = todos.filter(t => t.status === "in_progress").length;
+  console.log();
+  console.log(severity.muted(`    ${done}/${todos.length} completed${inprog > 0 ? `, ${inprog} in progress` : ""}`));
+}
+
+function renderAgentStats(agents: AgentStat[]): void {
+  if (agents.length === 0) return;
+  console.log();
+  console.log(severity.bold(`  Sub-agents (${agents.length}):`));
+  console.log();
+  for (const a of agents) {
+    const modelStr = a.model ? chalk.dim(` [${a.model}]`) : "";
+    const descStr  = a.description ? ` — ${a.description.slice(0, 60)}` : "";
+    console.log(`    ${a.type}${modelStr}${descStr}`);
+  }
+}
+
 export async function runSession(
   cfg: ResolvedConfig,
   sessionKeyArg: string | undefined,
@@ -130,7 +185,8 @@ export async function runSession(
       for (const c of namedSessions) {
         const isActive = active?.sessionKey === c.sessionKey;
         const activeTag = isActive ? chalk.green(" ●") : "";
-        console.log(`  ${chalk.bold(c.sessionKey)}${activeTag}`);
+        const nameStr = c.sessionName ? ` ${chalk.dim(`"${c.sessionName}"`)}` : "";
+        console.log(`  ${chalk.bold(c.sessionKey)}${activeTag}${nameStr}`);
         console.log(
           `    Model: ${c.model ?? "—"}   ` +
           `Ctx: ${fmtTokens(c.contextTokens || c.inputTokens)}   Out: ${fmtTokens(c.outputTokens)}   ` +
@@ -155,12 +211,15 @@ export async function runSession(
         }
       }
     } else {
-      const head = ["Session Key", "Model", "Ctx / Out tokens", "Cost", "Compacts", "Last Active"];
+      const head = ["Session", "Model", "Ctx / Out tokens", "Cost", "Compacts", "Last Active"];
       const rows = namedSessions.map((c) => {
         const isActive = active?.sessionKey === c.sessionKey;
-        const keyDisplay = c.sessionKey.length > 25
-          ? `${c.sessionKey.slice(0, 24)}…${isActive ? " ●" : ""}`
-          : `${c.sessionKey}${isActive ? " ●" : ""}`;
+        // Prefer human-readable name; fall back to key
+        const displayLabel = c.sessionName ?? c.sessionKey;
+        const truncLimit = 28;
+        const keyDisplay = displayLabel.length > truncLimit
+          ? `${displayLabel.slice(0, truncLimit - 1)}…${isActive ? " ●" : ""}`
+          : `${displayLabel}${isActive ? " ●" : ""}`;
         const ctxTokens = c.contextTokens || c.inputTokens;
         return [
           keyDisplay,
@@ -171,11 +230,11 @@ export async function runSession(
           c.lastActiveAt > 0 ? fmtDate(c.lastActiveAt) : "—",
         ];
       });
-      const colWidths = computeColWidths(head, rows, [20, 16, 14, 8, 8, 12]);
+      const colWidths = computeColWidths(head, rows, [24, 16, 14, 8, 8, 12]);
       const table = makeTable(head, colWidths);
       for (const row of rows) table.push(row);
       console.log(table.toString());
-      if (namedSessions.some(c => c.sessionKey.length > 25)) {
+      if (namedSessions.some(c => !c.sessionName && c.sessionKey.length > 28)) {
         console.log(severity.muted("  Tip: use --full to see complete session keys"));
       }
       if (orphanSessions.length > 0) {
@@ -209,12 +268,37 @@ export async function runSession(
     process.exit(1);
   }
 
+  // Load supplementary data from DB (written by daemon)
+  const db = openDb(cfg.probeDir);
+  const dbToolStats  = getToolStats(db, agent, targetKey);
+  const dbTodoSnap   = getTodoSnapshot(db, agent, targetKey);
+  const dbAgentStats = getAgentStats(db, agent, targetKey);
+
+  // Fall back to live-parsed stats if daemon hasn't run yet
+  const liveEntry  = readSessionsStore(cfg.sessionsDir).find((e) => e.sessionKey === targetKey);
+  const jsonlPath2 = liveEntry
+    ? findJsonlPath(cfg.sessionsDir, liveEntry)
+    : (() => {
+        const p = path.join(cfg.sessionsDir, `${targetKey}.jsonl`);
+        return fs.existsSync(p) ? p : null;
+      })();
+  const liveStats = jsonlPath2 ? parseSessionStats(jsonlPath2) : null;
+
+  const toolStats: ToolStat[] = dbToolStats.length > 0
+    ? dbToolStats.map(r => ({ name: r.tool_name, callCount: r.call_count, errorCount: r.error_count }))
+    : (liveStats?.toolStats ?? []);
+  const todos: TodoItem[]       = dbTodoSnap  ? JSON.parse(dbTodoSnap.todos_json) as TodoItem[] : (liveStats?.latestTodos ?? []);
+  const agentList: AgentStat[]  = dbAgentStats.length > 0
+    ? dbAgentStats.map(r => ({ id: r.sub_id, type: r.sub_type, model: r.model ?? undefined, description: r.description ?? undefined }))
+    : (liveStats?.agentStats ?? []);
+
   if (opts.json) {
-    outputJson(cost);
+    outputJson({ ...cost, toolStats, todos, agents: agentList });
     return;
   }
 
-  header("📊", `Session: ${targetKey}`);
+  const sessionTitle = cost.sessionName ? `${cost.sessionName}  ${chalk.dim(`(${targetKey})`)}` : targetKey;
+  header("📊", `Session: ${sessionTitle}`);
 
   console.log(`  Agent:       ${agent}`);
   if (cost.model) console.log(`  Model:       ${cost.model}`);
@@ -264,6 +348,13 @@ export async function runSession(
       `    Avg per turn: ${fmtUsd(avgUsd)}  |  Costliest: Turn ${maxTurn.turnIndex} (${fmtUsd(maxTurn.estimatedUsd)})`
     ));
   }
+
+  // Tool usage, todos, sub-agents
+  renderToolStats(toolStats);
+  if (opts.todos !== false) {
+    renderTodos(todos);
+  }
+  renderAgentStats(agentList);
 
   console.log();
   printCostDisclaimer();

@@ -1,12 +1,12 @@
 ---
 name: clawprobe
-description: Monitor OpenClaw agent health, token usage, API cost, and context window in real time. Use when you need to check your own status, inspect context utilization, estimate API costs, review compaction events, or get optimization suggestions. Provides structured JSON output for programmatic self-monitoring.
+description: Monitor OpenClaw agent health, token usage, API cost, context window, tool usage, todo progress, and sub-agents in real time. Use when you need to check your own status, inspect context utilization, estimate API costs, review tool usage patterns, check todo completion, or get optimization suggestions. Provides structured JSON output for programmatic self-monitoring.
 metadata: {"openclaw": {"emoji": "🦀", "homepage": "https://github.com/seekcontext/ClawProbe"}}
 ---
 
 # clawprobe
 
-Real-time observability for OpenClaw agents. Check health, token usage, API cost, context window, and optimization suggestions — all from the CLI.
+Real-time observability for OpenClaw agents. Check health, token usage, API cost, context window, tool usage, todo progress, and optimization suggestions — all from the CLI.
 
 ## Install
 
@@ -21,7 +21,7 @@ clawprobe start
 |---------|-------------|
 | `clawprobe status --json` | Full health snapshot (session, model, context %, cost, alerts) |
 | `clawprobe cost --week --json` | API cost breakdown for the past week |
-| `clawprobe session --json` | Current session token timeline, turn by turn |
+| `clawprobe session --json` | Session breakdown: turns, tool usage, todos, sub-agents |
 | `clawprobe context --json` | Context window utilization and truncation warnings |
 | `clawprobe suggest --json` | Active optimization alerts with `ruleId` and `action` |
 | `clawprobe compacts --json` | List recent compaction events and lost content |
@@ -49,6 +49,18 @@ Key fields to act on:
 - `suggestions[].ruleId === "tools-truncation"` → TOOLS.md is being cut off
 - `suggestions[].ruleId === "cost-spike"` → today's spend is unusually high
 - `daemonRunning: false` → run `clawprobe start` to enable monitoring
+
+## Checking tool usage and todo progress
+
+```bash
+# Get tool usage, todo state, and sub-agents for the current session
+clawprobe session --json
+```
+
+Key fields in session JSON:
+- `toolStats[].name` / `callCount` / `errorCount` — which tools were called and any errors
+- `todos[].content` / `status` — todo list items (`pending`, `in_progress`, `completed`)
+- `agents[].type` / `model` / `description` — sub-agent invocations
 
 ## Handling suggestions programmatically
 

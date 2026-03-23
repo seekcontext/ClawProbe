@@ -34,6 +34,9 @@ clawprobe fixes that. It watches OpenClaw's files in the background and gives yo
 | "What did the agent forget after compaction?" | `clawprobe compacts` |
 | "What is this costing me?" | `clawprobe cost --week` with per-model pricing |
 | "Is my TOOLS.md actually reaching the model?" | Truncation detection built-in |
+| "Which tools is my agent using most?" | `clawprobe session` — tool usage breakdown |
+| "Did the agent finish its task list?" | `clawprobe session` — live todo progress |
+| "Did it spawn sub-agents?" | `clawprobe session` — sub-agent invocation log |
 
 **No configuration required. Zero side effects. 100% local.**
 
@@ -109,7 +112,7 @@ clawprobe top  refreshing every 2s  (q / Ctrl+C to quit)     03/18/2026 17:42:35
   Headroom  112.7K tokens remaining (56%)
 ────────────────────────────────────────────────────────────────────────────────
   Session cost  $0.52        Input   859.2K tok      Output   29.8K tok
-  Today total   $0.67        Cache read   712.0K tok
+  Today total   $0.67        Cache read   712.0K tok   Cache write  48.0K tok
 ────────────────────────────────────────────────────────────────────────────────
   Recent turns
   Turn  Time      ΔInput   ΔOutput  Cost          Note
@@ -163,25 +166,53 @@ Built-in prices for: OpenAI (GPT-4o, o1, o3, o4-mini), Anthropic (Claude 3/3.5/3
 
 ### `clawprobe session` — Session Breakdown
 
-Drill into any session: total cost, token timeline, and exactly what each turn consumed.
+Drill into any session: total cost, turn timeline, tool usage, todo progress, and sub-agents.
 
 ```
 $ clawprobe session
 
-💬  Session  agent:main:workspace:…
+📊  Session  Refactor auth module  (agent:main:workspace:…)
 ──────────────────────────────────────────────────
-  Model:      moonshot/kimi-k2.5
-  Duration:   2h 14m
-  Tokens:     In 859.2K  Out 29.8K  Context 87.3K
-  Est. cost:  $0.52
-  Compacts:   2
+  Model:       moonshot/kimi-k2.5
+  Started:     Today 14:02
+  Last active: Today 16:41  (2h 39m)
+  Compactions: 2
 
-  Turn timeline:
-  Turn  Time   ΔInput   ΔOutput  Cost
-  1     14:02   4.2K     312     $0.003
-  2     14:18  12.7K     891     $0.009  ◆ compact
-  3     14:41  38.1K    2.4K     $0.028
-  …
+  Token usage:
+    Context now:  87.3K tokens
+    Output total: 29.8K tokens   $0.52
+
+  Turn-by-turn timeline:
+    Turn  1  Today 14:02   ctx  4.2K / out +312    $0.003
+    Turn  2  Today 14:18   ctx 12.7K / out +891    $0.009  ← compact
+    Turn  3  Today 14:41   ctx 38.1K / out +2.4K   $0.028
+    …
+
+  Tool usage:
+    Read                      42 calls
+    Bash                      18 calls   2 err
+    Edit                      11 calls
+    Grep                       9 calls
+
+  Todo list:
+    ✓  Extract JWT validation into middleware
+    ✓  Add refresh token endpoint
+    →  Write integration tests
+    ○  Update API docs
+
+    2/4 completed, 1 in progress
+
+  Sub-agents (1):
+    generalPurpose [moonshot/kimi-k2.5] — Run the test suite and fix failures
+```
+
+```bash
+clawprobe session                    # active session
+clawprobe session --list             # all sessions (shows human-readable names)
+clawprobe session <key>              # specific session
+clawprobe session --no-todos         # hide todo section
+clawprobe session --no-turns         # hide turn timeline
+clawprobe session --json             # machine-readable output
 ```
 
 ---
@@ -224,6 +255,7 @@ $ clawprobe compacts
     🤖  "Done — added exponential backoff with 3 retries. The key change is in…"
 
     → Archive: clawprobe compacts --save 3
+    → Archive to custom path: clawprobe compacts --save 3 --file notes/compact-log.md
 ```
 
 ---

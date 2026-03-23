@@ -1,7 +1,10 @@
 import fs from "fs";
 import path from "path";
 import { ResolvedConfig } from "./core/config.js";
-import { openDb, insertSessionSnapshot, upsertCompactEvent } from "./core/db.js";
+import {
+  openDb, insertSessionSnapshot, upsertCompactEvent,
+  upsertToolStats, upsertTodoSnapshot, upsertAgentStat,
+} from "./core/db.js";
 import { FileWatcher, buildWatchGlobs, FileChange } from "./core/watcher.js";
 import { readSessionsStore, listJsonlFiles, findJsonlPath, clearJsonlCache } from "./core/session-store.js";
 import { parseIncremental, parseAll, parseSessionStats } from "./core/jsonl-parser.js";
@@ -192,13 +195,38 @@ async function processJsonlFile(
   // re-parse the full file because parseSessionStats reads everything anyway.
   try {
     const stats = parseSessionStats(filePath);
-    if (stats && stats.turns.length > 0) {
-      recordSessionTurns(db, agent, sessionKey, stats, cfg.probe.cost.customPrices);
-      console.log(
-        `[daemon] turns recorded: ${sessionKey.slice(0, 30)} ` +
-        `turns=${stats.turns.length} in=${stats.totalInput} out=${stats.totalOutput} ` +
-        `cacheRead=${stats.totalCacheRead} cacheWrite=${stats.totalCacheWrite} model=${stats.model}`
-      );
+    if (stats) {
+      const now = Math.floor(Date.now() / 1000);
+
+      if (stats.turns.length > 0) {
+        recordSessionTurns(db, agent, sessionKey, stats, cfg.probe.cost.customPrices);
+        console.log(
+          `[daemon] turns recorded: ${sessionKey.slice(0, 30)} ` +
+          `turns=${stats.turns.length} in=${stats.totalInput} out=${stats.totalOutput} ` +
+          `cacheRead=${stats.totalCacheRead} cacheWrite=${stats.totalCacheWrite} model=${stats.model}`
+        );
+      }
+
+      // Write tool stats
+      for (const tool of stats.toolStats) {
+        upsertToolStats(db, agent, sessionKey, tool.name, tool.callCount, tool.errorCount, now);
+      }
+
+      // Write latest todo snapshot (only when there are todos)
+      if (stats.latestTodos.length > 0) {
+        upsertTodoSnapshot(db, agent, sessionKey, JSON.stringify(stats.latestTodos), now);
+      }
+
+      // Write sub-agent invocations
+      for (const sub of stats.agentStats) {
+        upsertAgentStat(db, agent, sessionKey, {
+          sub_id: sub.id,
+          sub_type: sub.type,
+          model: sub.model ?? null,
+          description: sub.description ?? null,
+          sampled_at: now,
+        });
+      }
     }
   } catch (err) {
     console.error(`[daemon] turn record error for ${sessionKey}:`, err);

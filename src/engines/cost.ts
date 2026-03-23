@@ -122,6 +122,8 @@ export interface PeriodCostSummary {
 
 export interface SessionCost {
   sessionKey: string;
+  /** Human-readable session name extracted from jsonl (slug or custom-title) */
+  sessionName?: string;
   model: string | null;
   provider: string | null;
   /** Cumulative input tokens sent (from sessions.json or db snapshots) */
@@ -306,6 +308,7 @@ export function getSessionCostFromJsonl(
 
   return {
     sessionKey,
+    sessionName: stats.sessionName,
     model,
     provider: stats.provider,
     // totalInput = Σ(input per turn) — matches API billing: each turn charges its full context

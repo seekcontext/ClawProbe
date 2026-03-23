@@ -93,10 +93,32 @@ export interface TurnStats {
   toolCallCount: number;
 }
 
+// --- Tool / Todo / Agent tracking ---
+
+export interface ToolStat {
+  name: string;
+  callCount: number;
+  errorCount: number;
+}
+
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+export interface AgentStat {
+  id: string;
+  type: string;
+  model?: string;
+  description?: string;
+}
+
 // --- Session-level stats derived from jsonl ---
 
 export interface SessionStats {
   sessionId: string;
+  /** Human-readable session name from slug or custom-title field */
+  sessionName?: string;
   /** Unix seconds */
   startedAt: number;
   /** Unix seconds of last message */
@@ -124,6 +146,12 @@ export interface SessionStats {
   /** Number of compaction events */
   compactionCount: number;
   turns: TurnStats[];
+  /** Per-tool usage statistics */
+  toolStats: ToolStat[];
+  /** Most recent todo list (from last TodoWrite call) */
+  latestTodos: TodoItem[];
+  /** Sub-agent invocations (from Task tool calls) */
+  agentStats: AgentStat[];
 }
 
 export interface ParseResult {
@@ -233,6 +261,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
   const lines = raw.split("\n").filter((l) => l.trim().length > 0);
 
   let sessionId = "";
+  let sessionName: string | undefined;
   let startedAt = 0;
   let lastActiveAt = 0;
   let model: string | null = null;
@@ -248,6 +277,14 @@ export function parseSessionStats(filePath: string): SessionStats | null {
   let toolCallCount = 0;
   let compactionCount = 0;
   const turns: TurnStats[] = [];
+
+  // Tool/Todo/Agent tracking
+  const toolMap = new Map<string, ToolStat>();
+  // Map from toolCall id → tool name, used to correlate toolResult errors
+  const toolCallIdMap = new Map<string, string>();
+  let latestTodos: TodoItem[] = [];
+  const taskIdToIndex = new Map<string, number>();
+  const agentStats: AgentStat[] = [];
 
   for (const line of lines) {
     let entry: Record<string, unknown>;
@@ -268,6 +305,18 @@ export function parseSessionStats(filePath: string): SessionStats | null {
 
     if (type === "session") {
       sessionId = (entry["id"] as string | undefined) ?? "";
+      // Extract human-readable session name from slug or custom-title
+      const slug = entry["slug"] as string | undefined;
+      const customTitle = entry["customTitle"] as string | undefined;
+      if (customTitle) sessionName = customTitle;
+      else if (slug) sessionName = slug;
+      continue;
+    }
+
+    // custom-title can also appear as a separate entry type
+    if (type === "custom-title") {
+      const title = entry["customTitle"] as string | undefined;
+      if (title) sessionName = title;
       continue;
     }
 
@@ -288,8 +337,23 @@ export function parseSessionStats(filePath: string): SessionStats | null {
       continue;
     }
 
-    // toolResult entries — skip for token counting
-    if (role === "toolResult" || role === "tool") continue;
+    // toolResult messages — check for errors to update tool error counts
+    if (role === "toolResult" || role === "tool") {
+      const content = msg["content"] as unknown[] | undefined ?? [];
+      for (const block of content) {
+        const b = block as Record<string, unknown>;
+        const toolUseId = (b["toolUseId"] ?? b["tool_use_id"]) as string | undefined;
+        const isError = !!(b["isError"] ?? b["is_error"]);
+        if (isError && toolUseId) {
+          const toolName = toolCallIdMap.get(toolUseId);
+          if (toolName) {
+            const stat = toolMap.get(toolName);
+            if (stat) stat.errorCount++;
+          }
+        }
+      }
+      continue;
+    }
 
     if (role === "assistant") {
       // Skip delivery-mirror entries — OpenClaw writes these as internal routing
@@ -307,11 +371,79 @@ export function parseSessionStats(filePath: string): SessionStats | null {
       const stopReason = (msg["stopReason"] as string | undefined) ?? "";
       const isError = stopReason === "error" || !!(msg["errorMessage"]);
 
-      // Count tool calls in content
+      // Parse tool calls from content
       const content = msg["content"] as unknown[] | undefined ?? [];
-      const toolCalls = content.filter(
-        (c) => (c as Record<string, unknown>)["type"] === "toolCall"
-      ).length;
+      let turnToolCalls = 0;
+
+      for (const block of content) {
+        const b = block as Record<string, unknown>;
+        if (b["type"] !== "toolCall") continue;
+
+        turnToolCalls++;
+        const toolName = (b["name"] as string | undefined) ?? "unknown";
+        const toolId   = (b["id"]   as string | undefined);
+        const toolInput = b["input"] as Record<string, unknown> | undefined;
+
+        // Register id→name mapping for error correlation
+        if (toolId) toolCallIdMap.set(toolId, toolName);
+
+        // Track per-tool stats (only for non-internal tools)
+        if (toolName !== "Task") {
+          const existing = toolMap.get(toolName);
+          if (existing) {
+            existing.callCount++;
+          } else {
+            toolMap.set(toolName, { name: toolName, callCount: 1, errorCount: 0 });
+          }
+        }
+
+        // TodoWrite — rebuild todo list from the input
+        if (toolName === "TodoWrite") {
+          const rawTodos = (toolInput?.["todos"] as unknown[] | undefined) ?? [];
+          latestTodos = rawTodos.map((t) => {
+            const todo = t as Record<string, unknown>;
+            return {
+              content: (todo["content"] as string | undefined) ?? "",
+              status: normalizeTodoStatus(todo["status"]),
+            };
+          });
+          taskIdToIndex.clear();
+        }
+
+        // TaskCreate — add to todo list
+        if (toolName === "TaskCreate") {
+          const subject = (toolInput?.["subject"] as string | undefined) ?? "";
+          const description = (toolInput?.["description"] as string | undefined) ?? "";
+          const content = subject || description || "Untitled task";
+          const status = normalizeTodoStatus(toolInput?.["status"]);
+          latestTodos.push({ content, status });
+          const taskId = (toolInput?.["taskId"] as string | undefined) ?? toolId;
+          if (taskId) taskIdToIndex.set(String(taskId), latestTodos.length - 1);
+        }
+
+        // TaskUpdate — update existing todo
+        if (toolName === "TaskUpdate") {
+          const taskId = toolInput?.["taskId"];
+          const idx = resolveTaskIndex(taskId, taskIdToIndex, latestTodos);
+          if (idx !== null) {
+            const newStatus = normalizeTodoStatus(toolInput?.["status"]);
+            latestTodos[idx]!.status = newStatus;
+            const subject = (toolInput?.["subject"] as string | undefined) ?? "";
+            const desc    = (toolInput?.["description"] as string | undefined) ?? "";
+            if (subject || desc) latestTodos[idx]!.content = subject || desc;
+          }
+        }
+
+        // Task — sub-agent invocation
+        if (toolName === "Task") {
+          agentStats.push({
+            id: toolId ?? `agent-${agentStats.length}`,
+            type: (toolInput?.["subagent_type"] as string | undefined) ?? "unknown",
+            model: (toolInput?.["model"] as string | undefined),
+            description: (toolInput?.["description"] as string | undefined),
+          });
+        }
+      }
 
       if (isError) {
         errorTurns++;
@@ -330,7 +462,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
             lastTotalTokens = usage.totalTokens;
           }
         }
-        toolCallCount += toolCalls;
+        toolCallCount += turnToolCalls;
 
         const msgTs = (msg["timestamp"] as number | undefined);
         const turnTs = msgTs ? Math.floor(msgTs / 1000) : entrySec;
@@ -343,14 +475,18 @@ export function parseSessionStats(filePath: string): SessionStats | null {
           usage: usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 },
           stopReason,
           isError: false,
-          toolCallCount: toolCalls,
+          toolCallCount: turnToolCalls,
         });
       }
     }
   }
 
+  // Sort tool stats by call count descending
+  const toolStats = Array.from(toolMap.values()).sort((a, b) => b.callCount - a.callCount);
+
   return {
     sessionId,
+    sessionName,
     startedAt,
     lastActiveAt,
     model,
@@ -366,7 +502,43 @@ export function parseSessionStats(filePath: string): SessionStats | null {
     toolCallCount,
     compactionCount,
     turns,
+    toolStats,
+    latestTodos,
+    agentStats,
   };
+}
+
+// --- Helper functions for todo/task parsing ---
+
+function normalizeTodoStatus(status: unknown): TodoItem["status"] {
+  switch (status) {
+    case "in_progress":
+    case "running":
+      return "in_progress";
+    case "completed":
+    case "complete":
+    case "done":
+      return "completed";
+    default:
+      return "pending";
+  }
+}
+
+function resolveTaskIndex(
+  taskId: unknown,
+  taskIdToIndex: Map<string, number>,
+  todos: TodoItem[]
+): number | null {
+  if (typeof taskId === "string" || typeof taskId === "number") {
+    const key = String(taskId);
+    const mapped = taskIdToIndex.get(key);
+    if (typeof mapped === "number") return mapped;
+    if (/^\d+$/.test(key)) {
+      const idx = Number.parseInt(key, 10) - 1;
+      if (idx >= 0 && idx < todos.length) return idx;
+    }
+  }
+  return null;
 }
 
 // --- Full analysis helpers ---

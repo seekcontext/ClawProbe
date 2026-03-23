@@ -1,6 +1,6 @@
 {
   "name": "clawprobe",
-  "version": "0.6.9",
+  "version": "1.0.0",
   "description": "The missing observability layer for OpenClaw agents",
   "keywords": [
     "openclaw",
@@ -21,7 +21,7 @@
   },
   "scripts": {
     "prepublishOnly": "npm run build",
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "test": "tsx --test test/**/*.test.ts",

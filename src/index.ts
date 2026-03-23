@@ -170,10 +170,11 @@ program
 // --- session ---
 const sessionCmd = program
   .command("session [session-key]")
-  .description("Per-session cost and turn breakdown")
+  .description("Per-session cost, turn breakdown, tool usage, and todos")
   .option("--list", "List all sessions")
   .option("--full", "Show full session keys (no truncation)")
   .option("--no-turns", "Hide turn-by-turn timeline")
+  .option("--no-todos", "Hide todo list section")
   .option("--agent <name>", "Target agent")
   .option("--json", "Output as JSON")
   .action(async (sessionKey, opts) => {
@@ -191,6 +192,7 @@ program
   .option("--session <key>", "Filter by session")
   .option("--show-messages", "Show full message content")
   .option("--save <id>", "Save a compact event's messages to memory")
+  .option("--file <path>", "Target file for --save (default: MEMORY.md in workspace)")
   .option("--json", "Output as JSON")
   .action(async (opts) => {
     const cfg = resolveConfig();

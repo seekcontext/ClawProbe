@@ -190,18 +190,22 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
   writeLine(10, hr);
 
   // ── Rows 11–12: cost summary ──────────────────────────────────────────────
-  const sessCost  = sessionCost?.estimatedUsd ?? 0;
-  const inputTok  = sessionEntry.inputTokens;
-  const outputTok = sessionEntry.outputTokens;
-  const cacheRead = jsonlStats?.totalCacheRead ?? 0;
+  const sessCost   = sessionCost?.estimatedUsd ?? 0;
+  const inputTok   = sessionEntry.inputTokens;
+  const outputTok  = sessionEntry.outputTokens;
+  const cacheRead  = jsonlStats?.totalCacheRead  ?? 0;
+  const cacheWrite = jsonlStats?.totalCacheWrite ?? 0;
   writeLine(11,
     `  Session cost  ${fmtUsd(sessCost).padEnd(12)}` +
     `  Input   ${fmtTokens(inputTok)} tok`.padEnd(22) +
     `  Output   ${fmtTokens(outputTok)} tok`
   );
+  const cacheParts: string[] = [];
+  if (cacheRead  > 0) cacheParts.push(`Cache read   ${fmtTokens(cacheRead)} tok`);
+  if (cacheWrite > 0) cacheParts.push(`Cache write  ${fmtTokens(cacheWrite)} tok`);
   writeLine(12,
     `  Today total   ${fmtUsd(todaySummary.totalUsd).padEnd(12)}` +
-    (cacheRead > 0 ? `  Cache read   ${fmtTokens(cacheRead)} tok` : "")
+    (cacheParts.length > 0 ? `  ${cacheParts.join("   ")}` : "")
   );
 
   // ── Row 13: separator ─────────────────────────────────────────────────────
@@ -298,4 +302,7 @@ export async function runTop(cfg: ResolvedConfig, opts: TopOptions): Promise<voi
 
   render(cfg, agent, intervalSec);
   setInterval(() => render(cfg, agent, intervalSec), intervalSec * 1000);
+
+  // Re-render immediately on terminal resize
+  process.on("SIGWINCH", () => render(cfg, agent, intervalSec));
 }

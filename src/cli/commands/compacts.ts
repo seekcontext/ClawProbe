@@ -11,6 +11,8 @@ interface CompactsOptions {
   last?: number;
   showMessages?: boolean;
   save?: string;
+  /** Override the target memory file path for --save */
+  file?: string;
   json?: boolean;
 }
 
@@ -39,7 +41,10 @@ export async function runCompacts(cfg: ResolvedConfig, opts: CompactsOptions): P
       console.log(severity.muted("  No messages to save for this compact event."));
       return;
     }
-    const memFile = path.join(cfg.workspaceDir, cfg.probe.memory.defaultFile);
+    const rawMemPath = opts.file ?? cfg.probe.memory.defaultFile;
+    const memFile = path.isAbsolute(rawMemPath)
+      ? rawMemPath
+      : path.join(cfg.workspaceDir, rawMemPath);
     const relFile = path.relative(cfg.workspaceDir, memFile);
     const label = event.compacted_at ? fmtDate(event.compacted_at) : `compact-${compactId}`;
     saveCompactedMessages(memFile, messages, label);
