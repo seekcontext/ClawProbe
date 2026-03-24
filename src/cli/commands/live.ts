@@ -61,11 +61,12 @@ function renderEvent(event: LiveEvent, W: number): string | null {
 
     case "tool_call": {
       const icon = getToolIcon(event.tool ?? "");
-      // Pad tool name for alignment (max 14 visible chars)
       const nameRaw = event.tool ?? "unknown";
-      const namePadded = nameRaw + " ".repeat(Math.max(0, 14 - nameRaw.length));
+      // Pad to align summaries: use 16 chars to accommodate OpenClaw names like "memory_search"
+      const PAD = 16;
+      const namePadded = nameRaw + " ".repeat(Math.max(0, PAD - nameRaw.length));
       const name = chalk.cyan(namePadded);
-      const maxSummaryLen = Math.max(15, W - 46);
+      const maxSummaryLen = Math.max(15, W - (10 + PAD + 6));
       const summary = event.toolSummary
         ? chalk.dim(event.toolSummary.slice(0, maxSummaryLen))
         : "";
@@ -75,7 +76,7 @@ function renderEvent(event: LiveEvent, W: number): string | null {
     case "tool_result":
       // Only surface errors — success is implicit and would be too noisy
       if (event.toolError) {
-        return chalk.red(`  ${pad}              ✗  error`);
+        return chalk.red(`  ${pad}                  ✗  error`);
       }
       return null;
 

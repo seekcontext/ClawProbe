@@ -36,6 +36,20 @@ export interface LiveEvent {
 // ── Tool icon map ─────────────────────────────────────────────────────────────
 
 const TOOL_ICONS: Record<string, string> = {
+  // OpenClaw native tools (lowercase / snake_case)
+  read:            "📖",
+  write:           "✏️ ",
+  edit:            "✏️ ",
+  exec:            "💻",
+  glob:            "🔍",
+  web_search:      "🌐",
+  web_fetch:       "🌐",
+  memory_search:   "🧠",
+  memory_get:      "🧠",
+  message:         "✉️ ",
+  sessions_spawn:  "🤖",
+  apply_patch:     "🩹",
+  // Claude Code / Cursor style tools (TitleCase)
   Read:       "📖",
   ReadFile:   "📖",
   Edit:       "✏️ ",
@@ -74,6 +88,50 @@ export function summarizeToolInput(
   const basename = (p: string) => (p ? path.basename(p) : "");
 
   switch (name) {
+    // ── OpenClaw native tools ──────────────────────────────────────────────
+    case "read":
+      return basename(str("path") || str("file") || str("file_path"));
+    case "write":
+    case "edit":
+      return basename(str("path") || str("file") || str("file_path"));
+    case "exec": {
+      const cmd = str("command") || str("cmd");
+      return trunc(cmd, 55);
+    }
+    case "glob":
+      return trunc(str("pattern") || str("glob_pattern"), 40);
+    case "web_search":
+      return trunc(str("query"), 45);
+    case "web_fetch":
+      return trunc(str("url"), 45);
+    case "memory_search":
+      return trunc(str("query"), 40);
+    case "memory_get":
+      return str("path") || "";
+    case "message": {
+      // message tool is action-based: { action: "send", provider: "feishu", to: "..." }
+      const action = str("action");
+      const provider = str("provider");
+      const to = str("to");
+      const parts: string[] = [];
+      if (action) parts.push(action);
+      if (provider) parts.push(provider);
+      if (to) parts.push(trunc(to, 20));
+      return parts.join(" → ");
+    }
+    case "sessions_spawn": {
+      // OpenClaw subagent launcher: { label, task, agentId }
+      const label = str("label") || str("agentId");
+      const task = str("task");
+      if (label && task) return `${label}: ${trunc(task, 30)}`;
+      if (task) return trunc(task, 40);
+      if (label) return label;
+      return "";
+    }
+    case "apply_patch":
+      return "";
+
+    // ── Claude Code / Cursor style tools ──────────────────────────────────
     case "Read":
     case "ReadFile":
       return basename(str("path") || str("file_path"));
@@ -83,7 +141,7 @@ export function summarizeToolInput(
       return basename(str("path") || str("file_path"));
     case "Bash":
     case "Shell":
-      return trunc(str("command") || str("cmd"), 50);
+      return trunc(str("command") || str("cmd"), 55);
     case "Grep":
       return trunc(str("pattern"), 40);
     case "Glob":
@@ -178,7 +236,8 @@ export function entryToLiveEvents(
         const block = b as Record<string, unknown>;
         const toolName = (block["name"] as string) ?? "unknown";
         const toolInput = (block["input"] as Record<string, unknown>) ?? {};
-        const isSubagent = toolName === "Task";
+        // Both Claude-style "Task" and OpenClaw-style "sessions_spawn" launch subagents
+        const isSubagent = toolName === "Task" || toolName === "sessions_spawn";
         return {
           kind: isSubagent ? "subagent_start" : "tool_call",
           timestamp: ts,

@@ -19,7 +19,7 @@ test('summarizeToolInput: Bash truncates long commands', () => {
   const cmd = 'a'.repeat(60);
   const result = summarizeToolInput('Bash', { command: cmd });
   assert.ok(result.endsWith('…'));
-  assert.ok(result.length <= 53); // 50 + '…'
+  assert.ok(result.length <= 56); // 55 + '…'
 });
 
 test('summarizeToolInput: Bash returns short command as-is', () => {
@@ -54,6 +54,64 @@ test('summarizeToolInput: Task shows subagent_type and description', () => {
 
 test('summarizeToolInput: unknown tool returns empty string', () => {
   assert.equal(summarizeToolInput('UnknownTool', { foo: 'bar' }), '');
+});
+
+// ── OpenClaw-specific (lowercase) tools ───────────────────────────────────────
+
+test('summarizeToolInput: OpenClaw read returns basename from path field', () => {
+  assert.equal(summarizeToolInput('read', { path: '/workspace/src/auth.ts' }), 'auth.ts');
+});
+
+test('summarizeToolInput: OpenClaw read returns basename from file field', () => {
+  assert.equal(summarizeToolInput('read', { file: '/workspace/src/main.ts' }), 'main.ts');
+});
+
+test('summarizeToolInput: OpenClaw write returns basename', () => {
+  assert.equal(summarizeToolInput('write', { path: '/workspace/config.json' }), 'config.json');
+});
+
+test('summarizeToolInput: OpenClaw exec returns truncated command', () => {
+  assert.equal(summarizeToolInput('exec', { command: 'npm test' }), 'npm test');
+  const long = 'x'.repeat(60);
+  assert.ok(summarizeToolInput('exec', { command: long }).endsWith('…'));
+});
+
+test('summarizeToolInput: OpenClaw web_search returns truncated query', () => {
+  const result = summarizeToolInput('web_search', { query: 'OpenClaw agent observability' });
+  assert.ok(result.includes('OpenClaw'));
+});
+
+test('summarizeToolInput: OpenClaw web_fetch returns url', () => {
+  assert.ok(summarizeToolInput('web_fetch', { url: 'https://example.com' }).includes('example.com'));
+});
+
+test('summarizeToolInput: OpenClaw memory_search returns query', () => {
+  assert.equal(summarizeToolInput('memory_search', { query: 'user preferences' }), 'user preferences');
+});
+
+test('summarizeToolInput: OpenClaw memory_get returns path', () => {
+  assert.equal(summarizeToolInput('memory_get', { path: 'preferences.md' }), 'preferences.md');
+});
+
+test('summarizeToolInput: OpenClaw message formats action + provider + to', () => {
+  const result = summarizeToolInput('message', {
+    action: 'send',
+    provider: 'feishu',
+    to: 'ou_abc123',
+  });
+  assert.ok(result.includes('send'));
+  assert.ok(result.includes('feishu'));
+  assert.ok(result.includes('ou_abc123'));
+});
+
+test('summarizeToolInput: OpenClaw sessions_spawn uses label and task', () => {
+  const result = summarizeToolInput('sessions_spawn', {
+    label: 'coder',
+    task: 'Run the test suite and fix all failures',
+    agentId: 'agent_1',
+  });
+  assert.ok(result.includes('coder'));
+  assert.ok(result.includes('Run the test suite'));
 });
 
 // ── entryToLiveEvents ─────────────────────────────────────────────────────────
@@ -165,6 +223,34 @@ test('entryToLiveEvents: Task tool emits subagent_start', () => {
   assert.equal(events[0]!.kind, 'subagent_start');
   assert.equal(events[0]!.tool, 'Task');
   assert.ok(events[0]!.toolSummary?.includes('generalPurpose'));
+});
+
+test('entryToLiveEvents: OpenClaw sessions_spawn emits subagent_start', () => {
+  const ctx = makeCtx();
+  const entry: JournalEntry = {
+    type: 'message',
+    id: 'a1',
+    parentId: 'u1',
+    timestamp: '2026-01-01T00:00:03Z',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          name: 'sessions_spawn',
+          id: 'tc1',
+          input: { label: 'coder', task: 'Run tests and fix failures', agentId: 'agent_2' },
+        },
+      ],
+    },
+    role: 'assistant',
+    content: '',
+  };
+  const events = entryToLiveEvents(entry, ctx);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.kind, 'subagent_start');
+  assert.equal(events[0]!.tool, 'sessions_spawn');
+  assert.ok(events[0]!.toolSummary?.includes('coder'));
 });
 
 test('entryToLiveEvents: toolResult without error emits tool_result with toolError=false', () => {
