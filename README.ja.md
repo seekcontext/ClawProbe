@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
+</p>
+
 # clawprobe
 
 **OpenClaw エージェントの状態をリアルタイムで把握する。**

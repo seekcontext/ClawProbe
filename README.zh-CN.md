@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
+</p>
+
 # clawprobe
 
 **实时掌握你的 OpenClaw Agent 状态。**
