@@ -13,6 +13,7 @@ import { runSession } from "./cli/commands/session.js";
 import { runCompacts } from "./cli/commands/compacts.js";
 import { runSchema } from "./cli/commands/schema.js";
 import { runTop } from "./cli/commands/top.js";
+import { runLive } from "./cli/commands/live.js";
 import { runContext } from "./cli/commands/context.js";
 import { runSuggest } from "./cli/commands/suggest.js";
 
@@ -380,6 +381,19 @@ program
     const cfg = resolveConfig();
     assertOpenClawExists(cfg);
     await runTop(cfg, opts);
+  });
+
+// --- live ---
+program
+  .command("live")
+  .description("Stream real-time agent activity — see every tool call as it happens")
+  .option("--agent <name>", "Target agent")
+  .option("--history", "Replay turns from the beginning of the current session")
+  .option("--file <path>", "Watch a specific .jsonl transcript file")
+  .action(async (opts) => {
+    const cfg = resolveConfig();
+    assertOpenClawExists(cfg);
+    await runLive(cfg, opts);
   });
 
 // --- schema ---

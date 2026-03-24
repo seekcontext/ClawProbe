@@ -20,6 +20,7 @@ If you find clawprobe useful, please consider giving it a ⭐ on [GitHub](https:
 [Why clawprobe](#why-clawprobe) •
 [Quick Start](#quick-start) •
 [Commands](#commands) •
+[`live`](#clawprobe-live--real-time-activity-stream) •
 [Agent Integration](#agent-integration) •
 [Configuration](#configuration) •
 [How It Works](#how-it-works)
@@ -36,6 +37,7 @@ clawprobe fixes that. It watches OpenClaw's files in the background and gives yo
 |---------|-----------|
 | "Is my agent healthy right now?" | `clawprobe status` — instant snapshot |
 | "I want to keep watching it live" | `clawprobe top` — live dashboard, auto-refreshing |
+| "What is the agent doing *right now*?" | `clawprobe live` — real-time tool call stream |
 | "Why is context compacting so often?" | `clawprobe context` + `clawprobe suggest` |
 | "What did the agent forget after compaction?" | `clawprobe compacts` |
 | "What is this costing me?" | `clawprobe cost --week` with per-model pricing |
@@ -139,6 +141,44 @@ clawprobe top                  # default 2s refresh
 clawprobe top --interval 5     # slower refresh
 clawprobe top --agent coder    # target a specific agent
 ```
+
+---
+
+### `clawprobe live` — Real-Time Activity Stream
+
+Open it in a side terminal to watch every tool call as it happens — not a refreshing dashboard, but a **live append-only feed** of exactly what the agent is doing: which files it's reading, which commands it's running, when it's thinking, and when a turn completes.
+
+```
+$ clawprobe live
+
+clawprobe live  ─  agent:main:workspace:…  ─  moonshot/kimi-k2.5   q to quit
+
+─── Turn 1  03/24 16:41 ─────────────────────────────────────────────────────
+  💭 thinking…
+  📖 Read           src/auth/middleware.ts
+  ✏️  Edit           src/auth/middleware.ts
+  📖 Read           src/auth/token.ts
+  ✏️  Edit           src/auth/token.ts
+  💻 Bash           npm test
+  ⚠  Bash failed — exit code 1
+  💻 Bash           npm test -- --filter auth
+  ✓  Turn done      +1,247 tokens out
+
+─── Turn 2  03/24 16:43 ─────────────────────────────────────────────────────
+  💭 thinking…
+  📖 Read           src/auth/token.ts
+```
+
+Unlike `clawprobe top` (periodic full-screen refresh), `live` is chronological and scrollable — you can scroll back to see what happened earlier in the session.
+
+```bash
+clawprobe live                   # watch the active session from now
+clawprobe live --history         # replay all turns from session start
+clawprobe live --agent coder     # target a specific agent
+clawprobe live --file <path>     # watch a specific .jsonl transcript
+```
+
+`q` or `Ctrl+C` to quit.
 
 ---
 

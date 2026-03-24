@@ -1,6 +1,6 @@
 # clawprobe User Manual
 
-> Version 1.0  
+> Version 1.2  
 > For OpenClaw users who want full visibility into their agent's context, costs, tool usage, todos, and memory.
 
 ---
@@ -99,6 +99,40 @@ Output:
 
   Last activity: 4 min ago
 ```
+
+### Watch agent activity in real time
+
+Open a second terminal next to your OpenClaw session and run:
+
+```bash
+clawprobe live
+```
+
+You'll see every tool call as it happens — files read, commands run, edits applied, and when each turn completes:
+
+```
+clawprobe live  ─  agent:main:workspace:…  ─  moonshot/kimi-k2.5   q to quit
+
+─── Turn 1  03/24 16:41 ────────────────────────────────────────────────────
+  💭 thinking…
+  📖 Read           src/auth/middleware.ts
+  ✏️  Edit           src/auth/middleware.ts
+  💻 Bash           npm test
+  ⚠  Bash failed — exit code 1
+  💻 Bash           npm test -- --filter auth
+  ✓  Turn done      +1,247 tokens out
+```
+
+Unlike `clawprobe top` (which refreshes the whole screen), `live` is an **append-only stream** — you can scroll back to see what the agent did earlier in the session.
+
+```bash
+clawprobe live                   # stream from now (new tool calls only)
+clawprobe live --history         # replay all turns from session start
+clawprobe live --agent coder     # target a specific agent
+clawprobe live --file <path>     # watch a specific .jsonl transcript
+```
+
+Press `q` or `Ctrl+C` to quit.
 
 ### Stop the daemon
 
@@ -1140,6 +1174,32 @@ clawprobe memory save-compact <compact-id> [options]
   --file <path>       Target file (default: MEMORY.md)
   --agent <name>      Target agent
 ```
+
+### clawprobe live
+
+Stream real-time agent activity — see every tool call as it happens.
+
+```
+clawprobe live [options]
+
+Options:
+  --agent <name>      Target agent (default: main)
+  --history           Replay all turns from session start (default: stream from now)
+  --file <path>       Watch a specific .jsonl transcript file
+```
+
+**Examples:**
+
+```bash
+clawprobe live                   # Stream new events for the active session
+clawprobe live --history         # Replay the full current session then stream live
+clawprobe live --agent coder     # Target a different agent
+clawprobe live --file ~/.openclaw/agents/main/sessions/sess_abc.jsonl
+```
+
+`clawprobe live` does **not** require the daemon to be running — it reads OpenClaw's `.jsonl` transcript files directly.
+
+---
 
 ### clawprobe session
 
