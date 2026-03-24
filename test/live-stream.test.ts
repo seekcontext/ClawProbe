@@ -336,6 +336,87 @@ test('entryToLiveEvents: compaction emits compaction event', () => {
   assert.equal(events[0]!.kind, 'compaction');
 });
 
+test('entryToLiveEvents: assistant with thinking block emits thinking event with content', () => {
+  const ctx = makeCtx();
+  const entry: JournalEntry = {
+    type: 'message',
+    id: 'a1',
+    parentId: 'u1',
+    timestamp: '2026-01-01T00:00:02Z',
+    message: {
+      role: 'assistant',
+      model: 'moonshot/kimi-k2.5',
+      content: [
+        {
+          type: 'thinking',
+          thinking: 'I need to check the failing test first.\nLet me look at the stack trace.',
+        },
+        { type: 'toolCall', name: 'read', id: 'tc1', arguments: { path: '/src/auth.test.ts' } },
+      ],
+    },
+    role: 'assistant',
+    content: '',
+  };
+  const events = entryToLiveEvents(entry, ctx);
+  // Expecting: [thinking (with content), tool_call]
+  assert.equal(events.length, 2);
+  assert.equal(events[0]!.kind, 'thinking');
+  assert.ok(events[0]!.thinkingContent?.includes('failing test'));
+  // Only first line should be in snippet
+  assert.ok(!events[0]!.thinkingContent?.includes('stack trace'));
+  assert.equal(events[1]!.kind, 'tool_call');
+  assert.equal(events[1]!.tool, 'read');
+  assert.equal(events[1]!.toolSummary, 'auth.test.ts');
+});
+
+test('entryToLiveEvents: thinking snippet truncates to 120 chars', () => {
+  const ctx = makeCtx();
+  const longLine = 'x'.repeat(200);
+  const entry: JournalEntry = {
+    type: 'message',
+    id: 'a1',
+    parentId: 'u1',
+    timestamp: '2026-01-01T00:00:02Z',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: longLine },
+        { type: 'text', text: 'Done.' },
+      ],
+      usage: { input: 500, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 600 },
+    },
+    role: 'assistant',
+    content: 'Done.',
+  };
+  const events = entryToLiveEvents(entry, ctx);
+  const thinkingEvent = events.find((e) => e.kind === 'thinking' && e.thinkingContent);
+  assert.ok(thinkingEvent, 'should emit thinking event with content');
+  assert.ok(thinkingEvent!.thinkingContent!.endsWith('…'));
+  assert.ok(thinkingEvent!.thinkingContent!.length <= 121); // 120 + ellipsis
+});
+
+test('entryToLiveEvents: assistant without thinking block emits no thinking event', () => {
+  const ctx = makeCtx();
+  const entry: JournalEntry = {
+    type: 'message',
+    id: 'a1',
+    parentId: 'u1',
+    timestamp: '2026-01-01T00:00:02Z',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', name: 'read', id: 'tc1', arguments: { path: '/src/main.ts' } },
+      ],
+    },
+    role: 'assistant',
+    content: '',
+  };
+  const events = entryToLiveEvents(entry, ctx);
+  // Only tool_call, no thinking
+  assert.equal(events.length, 1);
+  assert.equal(events[0]!.kind, 'tool_call');
+});
+
 test('entryToLiveEvents: delivery-mirror assistant entries are skipped', () => {
   const ctx = makeCtx();
   const entry: JournalEntry = {

@@ -31,6 +31,8 @@ export interface LiveEvent {
   tokensOut?: number;
   /** Model name (tool_call / turn_end) */
   model?: string;
+  /** Actual thinking content snippet (thinking event, when available from JSONL) */
+  thinkingContent?: string;
 }
 
 // ── Tool icon map ─────────────────────────────────────────────────────────────
@@ -168,6 +170,31 @@ interface ParseCtx {
   turnCounter: number;
 }
 
+/**
+ * Extract the first meaningful line of thinking content from an assistant
+ * message's content array (blocks with type="thinking").
+ * Returns undefined if no thinking blocks are present.
+ */
+function extractThinkingSnippet(content: unknown[]): string | undefined {
+  for (const block of content) {
+    const b = block as Record<string, unknown>;
+    if (b["type"] !== "thinking") continue;
+    const raw = b["thinking"];
+    if (typeof raw !== "string" || !raw.trim()) continue;
+
+    // Take the first non-empty line as the snippet
+    const firstLine = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => l.length > 0);
+    if (!firstLine) continue;
+
+    // Truncate at 120 chars
+    return firstLine.length > 120 ? firstLine.slice(0, 119) + "…" : firstLine;
+  }
+  return undefined;
+}
+
 function getEntryTimestampMs(entry: JournalEntry): number {
   const raw = entry as Record<string, unknown>;
   const ts = raw["timestamp"];
@@ -227,12 +254,23 @@ export function entryToLiveEvents(
     if (provider === "openclaw" || model === "delivery-mirror") return [];
 
     const content = (msg["content"] as unknown[]) ?? [];
+
+    // Extract thinking snippet from thinking blocks (written to JSONL after model finishes)
+    const thinkingContent = extractThinkingSnippet(content);
+
     const toolCallBlocks = content.filter(
       (b) => (b as Record<string, unknown>)["type"] === "toolCall"
     );
 
+    const events: LiveEvent[] = [];
+
+    // Emit thinking content if available (prepend before tool calls / turn_end)
+    if (thinkingContent) {
+      events.push({ kind: "thinking", timestamp: ts, thinkingContent });
+    }
+
     if (toolCallBlocks.length > 0) {
-      return toolCallBlocks.map((b) => {
+      for (const b of toolCallBlocks) {
         const block = b as Record<string, unknown>;
         const toolName = (block["name"] as string) ?? "unknown";
         // OpenClaw JSONL stores tool args as "arguments"; Claude/Cursor style uses "input".
@@ -240,24 +278,26 @@ export function entryToLiveEvents(
         const toolInput = ((block["arguments"] ?? block["input"]) as Record<string, unknown>) ?? {};
         // Both Claude-style "Task" and OpenClaw-style "sessions_spawn" launch subagents
         const isSubagent = toolName === "Task" || toolName === "sessions_spawn";
-        return {
+        events.push({
           kind: isSubagent ? "subagent_start" : "tool_call",
           timestamp: ts,
           tool: toolName,
           toolSummary: summarizeToolInput(toolName, toolInput),
           model,
-        } satisfies LiveEvent;
-      });
+        } satisfies LiveEvent);
+      }
+      return events;
     }
 
     // No tool calls → final text reply
     const usage = msg["usage"] as TokenUsage | undefined;
-    return [{
+    events.push({
       kind: "turn_end",
       timestamp: ts,
       tokensOut: usage?.output,
       model,
-    }];
+    });
+    return events;
   }
 
   // ── Tool result ───────────────────────────────────────────────────────────

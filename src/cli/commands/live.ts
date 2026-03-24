@@ -57,7 +57,14 @@ function renderEvent(event: LiveEvent, W: number): string | null {
       );
 
     case "thinking":
-      return chalk.dim(`  ${pad}  🤔 Thinking...`);
+      if (event.thinkingContent) {
+        // Actual thinking content from JSONL — show a snippet
+        const maxLen = Math.max(20, W - 14);
+        const snippet = event.thinkingContent.slice(0, maxLen);
+        return chalk.dim(`  ${time}  💭 ${snippet}`);
+      }
+      // Speculative indicator — model is thinking but hasn't written to JSONL yet
+      return chalk.dim(`  ${pad}  🤔 thinking...`);
 
     case "tool_call": {
       const icon = getToolIcon(event.tool ?? "");
