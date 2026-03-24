@@ -9,6 +9,8 @@
 [![GitHub Stars](https://img.shields.io/github/stars/seekcontext/ClawProbe)](https://github.com/seekcontext/ClawProbe)
 [![License](https://img.shields.io/github/license/seekcontext/ClawProbe)](./LICENSE)
 
+clawprobe が役に立ったと感じたら、[GitHub](https://github.com/seekcontext/ClawProbe) で ⭐ を付けていただけると励みになります！
+
 [English](./README.md) · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md)
 
 [なぜ clawprobe か](#なぜ-clawprobe-か) •
@@ -34,6 +36,9 @@ clawprobe はこの問題を解決します。バックグラウンドで OpenCl
 | 「圧縮後にエージェントが忘れたことは？」 | `clawprobe compacts` |
 | 「これ、いくらかかってるの？」 | `clawprobe cost --week`（主要モデルの価格内蔵） |
 | 「TOOLS.md はちゃんとモデルに届いている？」 | トランケーション検出を内蔵 |
+| 「どのツールが一番使われている？」 | `clawprobe session` — ツール使用統計 |
+| 「エージェントのタスクリストは完了した？」 | `clawprobe session` — リアルタイム Todo 進捗 |
+| 「サブエージェントは起動した？」 | `clawprobe session` — サブエージェント呼び出し履歴 |
 
 **設定不要。副作用ゼロ。100% ローカル動作。**
 
@@ -109,7 +114,7 @@ clawprobe top  refreshing every 2s  (q / Ctrl+C to quit)     03/18/2026 17:42:35
   Headroom  112.7K tokens remaining (56%)
 ────────────────────────────────────────────────────────────────────────────────
   Session cost  $0.52        Input   859.2K tok      Output   29.8K tok
-  Today total   $0.67        Cache read   712.0K tok
+  Today total   $0.67        Cache read   712.0K tok   Cache write  48.0K tok
 ────────────────────────────────────────────────────────────────────────────────
   Recent turns
   Turn  Time      ΔInput   ΔOutput  Cost          Note
@@ -163,25 +168,53 @@ $ clawprobe cost --week
 
 ### `clawprobe session` — セッション詳細
 
-任意のセッションを掘り下げる：合計コスト・トークン推移・各ターンの消費量を確認。
+任意のセッションを詳しく確認：合計コスト・ターン推移・ツール使用状況・Todo 進捗・サブエージェント呼び出しを一覧表示。
 
 ```
 $ clawprobe session
 
-💬  Session  agent:main:workspace:…
+📊  Session  Refactor auth module  (agent:main:workspace:…)
 ──────────────────────────────────────────────────
-  Model:      moonshot/kimi-k2.5
-  Duration:   2h 14m
-  Tokens:     In 859.2K  Out 29.8K  Context 87.3K
-  Est. cost:  $0.52
-  Compacts:   2
+  Model:       moonshot/kimi-k2.5
+  Started:     Today 14:02
+  Last active: Today 16:41  (2h 39m)
+  Compactions: 2
 
-  Turn timeline:
-  Turn  Time   ΔInput   ΔOutput  Cost
-  1     14:02   4.2K     312     $0.003
-  2     14:18  12.7K     891     $0.009  ◆ compact
-  3     14:41  38.1K    2.4K     $0.028
-  …
+  Token usage:
+    Context now:  87.3K tokens
+    Output total: 29.8K tokens   $0.52
+
+  Turn-by-turn timeline:
+    Turn  1  Today 14:02   ctx  4.2K / out +312    $0.003
+    Turn  2  Today 14:18   ctx 12.7K / out +891    $0.009  ← compact
+    Turn  3  Today 14:41   ctx 38.1K / out +2.4K   $0.028
+    …
+
+  Tool usage:
+    Read                      42 calls
+    Bash                      18 calls   2 err
+    Edit                      11 calls
+    Grep                       9 calls
+
+  Todo list:
+    ✓  Extract JWT validation into middleware
+    ✓  Add refresh token endpoint
+    →  Write integration tests
+    ○  Update API docs
+
+    2/4 completed, 1 in progress
+
+  Sub-agents (1):
+    generalPurpose [moonshot/kimi-k2.5] — Run the test suite and fix failures
+```
+
+```bash
+clawprobe session                    # アクティブなセッション
+clawprobe session --list             # 全セッション一覧（読みやすい名前付き）
+clawprobe session <key>              # 特定のセッション
+clawprobe session --no-todos         # Todo セクションを非表示
+clawprobe session --no-turns         # ターン推移を非表示
+clawprobe session --json             # 機械可読出力
 ```
 
 ---
@@ -224,6 +257,7 @@ $ clawprobe compacts
     🤖  "Done — added exponential backoff with 3 retries. The key change is in…"
 
     → Archive: clawprobe compacts --save 3
+    → Archive to custom path: clawprobe compacts --save 3 --file notes/compact-log.md
 ```
 
 ---
