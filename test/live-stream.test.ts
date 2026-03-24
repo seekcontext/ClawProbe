@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { entryToLiveEvents, summarizeToolInput, findMostRecentJsonl, startLiveStream } from '../src/core/live-stream.js';
+import {
+  entryToLiveEvents,
+  summarizeToolInput,
+  findMostRecentJsonl,
+  startLiveStream,
+  createLiveParseCtx,
+  applyJournalMeta,
+  extractUserPreview,
+} from '../src/core/live-stream.js';
 import { createFixture, cleanupFixture, writeTranscript } from './helpers.js';
 import type { JournalEntry } from '../src/core/jsonl-parser.js';
 
@@ -117,7 +125,7 @@ test('summarizeToolInput: OpenClaw sessions_spawn uses label and task', () => {
 // ── entryToLiveEvents ─────────────────────────────────────────────────────────
 
 function makeCtx() {
-  return { turnCounter: 0 };
+  return createLiveParseCtx();
 }
 
 test('entryToLiveEvents: session entry emits session_start and resets counter', () => {
@@ -291,7 +299,11 @@ test('entryToLiveEvents: toolResult without error emits tool_result with toolErr
     timestamp: '2026-01-01T00:00:04Z',
     message: {
       role: 'toolResult',
-      content: [{ type: 'toolResult', toolUseId: 'tc1', content: 'ok' }],
+      toolCallId: 'read:0',
+      toolName: 'read',
+      content: [{ type: 'text', text: 'file contents here' }],
+      details: { status: 'completed', exitCode: 0, durationMs: 15488 },
+      isError: false,
     },
     role: 'toolResult',
     content: '',
@@ -300,6 +312,11 @@ test('entryToLiveEvents: toolResult without error emits tool_result with toolErr
   assert.equal(events.length, 1);
   assert.equal(events[0]!.kind, 'tool_result');
   assert.equal(events[0]!.toolError, false);
+  assert.equal(events[0]!.toolCallId, 'read:0');
+  assert.equal(events[0]!.tool, 'read');
+  assert.equal(events[0]!.durationMs, 15488);
+  assert.equal(events[0]!.exitCode, 0);
+  assert.ok(events[0]!.resultPreview?.includes('file contents'));
 });
 
 test('entryToLiveEvents: toolResult with error emits tool_result with toolError=true', () => {
@@ -334,6 +351,49 @@ test('entryToLiveEvents: compaction emits compaction event', () => {
   const events = entryToLiveEvents(entry, ctx);
   assert.equal(events.length, 1);
   assert.equal(events[0]!.kind, 'compaction');
+});
+
+test('entryToLiveEvents: tool_call carries toolCallId from block id', () => {
+  const ctx = makeCtx();
+  const entry: JournalEntry = {
+    type: 'message',
+    id: 'a1',
+    parentId: 'u1',
+    timestamp: '2026-01-01T00:00:02Z',
+    message: {
+      role: 'assistant',
+      content: [
+        { type: 'toolCall', name: 'read', id: 'read:0', arguments: { path: '/x.md' } },
+      ],
+    },
+    role: 'assistant',
+    content: '',
+  };
+  const events = entryToLiveEvents(entry, ctx);
+  assert.equal(events[0]!.kind, 'tool_call');
+  assert.equal(events[0]!.toolCallId, 'read:0');
+});
+
+test('applyJournalMeta: thinking_level_change updates ctx and emits session_meta', () => {
+  const ctx = createLiveParseCtx();
+  const entry: JournalEntry = {
+    type: 'thinking_level_change',
+    id: 't1',
+    parentId: 'p1',
+    timestamp: '2026-01-01T00:00:00Z',
+    thinkingLevel: 'off',
+  } as JournalEntry;
+  const ev = applyJournalMeta(entry, ctx);
+  assert.equal(ctx.thinkingLevel, 'off');
+  assert.equal(ev?.kind, 'session_meta');
+  assert.equal(ev?.thinkingLevel, 'off');
+});
+
+test('extractUserPreview: strips OpenClaw message_id prefix', () => {
+  const text =
+    'Conversation info\n```json\n{}\n```\n\n[message_id: om_abc]\nhello from user';
+  const prev = extractUserPreview([{ type: 'text', text }]);
+  assert.equal(prev, 'hello from user');
 });
 
 test('entryToLiveEvents: assistant with thinking block emits thinking event with content', () => {
@@ -487,21 +547,34 @@ test('startLiveStream: emits events for appended JSONL content', async () => {
       { type: 'session', id: 's1', cwd: '/tmp', timestamp: 1000 },
     ]);
 
-    const collected: string[] = [];
+    const collected: { kind: string; pendingKind?: string }[] = [];
     const controller = new AbortController();
 
-    // Start stream with skipHistory=false to include existing content
     const streamPromise = startLiveStream(
       filePath,
-      (event) => { collected.push(event.kind); },
+      (event) => {
+        collected.push({
+          kind: event.kind,
+          pendingKind: event.pendingKind,
+        });
+      },
       controller.signal,
-      false  // replay from beginning
+      false
     );
 
-    // Give the stream time to read the initial session entry
     await new Promise<void>((r) => setTimeout(r, 150));
 
-    // Append a user message
+    fs.appendFileSync(
+      filePath,
+      JSON.stringify({
+        type: 'thinking_level_change',
+        id: 'tl',
+        parentId: 's1',
+        timestamp: 1500,
+        thinkingLevel: 'off',
+      }) + '\n'
+    );
+
     fs.appendFileSync(filePath, JSON.stringify({
       type: 'message',
       id: 'u1',
@@ -535,10 +608,13 @@ test('startLiveStream: emits events for appended JSONL content', async () => {
     // Ensure the promise resolves cleanly after abort
     await streamPromise;
 
-    assert.ok(collected.includes('session_start'), `expected session_start, got: ${collected.join(',')}`);
-    assert.ok(collected.includes('turn_start'),    `expected turn_start, got: ${collected.join(',')}`);
-    assert.ok(collected.includes('thinking'),      `expected thinking, got: ${collected.join(',')}`);
-    assert.ok(collected.includes('tool_call'),     `expected tool_call, got: ${collected.join(',')}`);
+    const kinds = collected.map((c) => c.kind);
+    assert.ok(kinds.includes('session_start'), `expected session_start, got: ${kinds.join(',')}`);
+    assert.ok(kinds.includes('session_meta'),    `expected session_meta, got: ${kinds.join(',')}`);
+    assert.ok(kinds.includes('turn_start'),      `expected turn_start, got: ${kinds.join(',')}`);
+    const pending = collected.find((c) => c.kind === 'thinking' && c.pendingKind);
+    assert.equal(pending?.pendingKind, 'awaiting', 'thinking=off → awaiting, not fake reasoning');
+    assert.ok(kinds.includes('tool_call'),       `expected tool_call, got: ${kinds.join(',')}`);
   } finally {
     cleanupFixture(fixture);
   }

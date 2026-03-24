@@ -1,6 +1,6 @@
 # clawprobe User Manual
 
-> Version 1.2  
+> Version 1.3  
 > For OpenClaw users who want full visibility into their agent's context, costs, tool usage, todos, and memory.
 
 ---
@@ -108,31 +108,31 @@ Open a second terminal next to your OpenClaw session and run:
 clawprobe live
 ```
 
-You'll see every tool call as it happens — files read, commands run, edits applied, and when each turn completes:
+You'll see a **Claude Code–style timeline**: session model/thinking updates, each turn with an optional user preview, honest wait lines (not labeled “thinking” when reasoning is off), each tool call followed by a **result line** (`└─ ok` / `└─ error` with duration and exit code when present), then `done` with tokens.
 
 ```
-clawprobe live  ─  agent:main:workspace:…  ─  moonshot/kimi-k2.5   q to quit
+  16:41:02  ◆  model moonshot/kimi-k2.5  ·  thinking off
 
-─── Turn 1  03/24 16:41 ────────────────────────────────────────────────────
-  💭 thinking…
-  📖 Read           src/auth/middleware.ts
-  ✏️  Edit           src/auth/middleware.ts
-  💻 Bash           npm test
-  ⚠  Bash failed — exit code 1
-  💻 Bash           npm test -- --filter auth
-  ✓  Turn done      +1,247 tokens out
+  16:41:10  ● Turn 1
+            …  waiting for assistant…
+  16:41:12  📖 read            auth.ts
+            └─ ok  12ms  exit 0
+  16:41:20  ● done  +120 tok
 ```
 
 Unlike `clawprobe top` (which refreshes the whole screen), `live` is an **append-only stream** — you can scroll back to see what the agent did earlier in the session.
 
 ```bash
-clawprobe live                   # stream from now (new tool calls only)
-clawprobe live --history         # replay all turns from session start
-clawprobe live --agent coder     # target a specific agent
-clawprobe live --file <path>     # watch a specific .jsonl transcript
+clawprobe live                         # stream from now (new events only)
+clawprobe live --history               # replay from session start, then stream
+clawprobe live --density compact       # hide successful tool result lines
+clawprobe live --density verbose       # show stopReason, tool ids, result previews
+clawprobe live --plain                 # ASCII-friendly output
+clawprobe live --agent coder           # target a specific agent
+clawprobe live --file <path>           # watch a specific .jsonl transcript
 ```
 
-Press `q` or `Ctrl+C` to quit.
+Keys: **`+` / `-`** cycle density, **`h`** help, **`q`** or **`Ctrl+C`** quit.
 
 ### Stop the daemon
 
@@ -1177,23 +1177,27 @@ clawprobe memory save-compact <compact-id> [options]
 
 ### clawprobe live
 
-Stream real-time agent activity — see every tool call as it happens.
+Stream real-time agent activity — Claude Code–style tool timeline with paired results and honest wait/reasoning states.
 
 ```
 clawprobe live [options]
 
 Options:
-  --agent <name>      Target agent (default: main)
-  --history           Replay all turns from session start (default: stream from now)
-  --file <path>       Watch a specific .jsonl transcript file
+  --agent <name>        Target agent (default: main)
+  --history             Replay all turns from session start (default: stream from now)
+  --file <path>         Watch a specific .jsonl transcript file
+  --density <mode>      compact | normal | verbose (default: normal)
+  --plain               ASCII-friendly output (no emoji)
 ```
 
 **Examples:**
 
 ```bash
-clawprobe live                   # Stream new events for the active session
-clawprobe live --history         # Replay the full current session then stream live
-clawprobe live --agent coder     # Target a different agent
+clawprobe live                         # Stream new events for the active session
+clawprobe live --history               # Replay the full current session then stream live
+clawprobe live --density verbose       # More detail (stopReason, tool ids, previews)
+clawprobe live --plain                 # SSH / log-friendly
+clawprobe live --agent coder           # Target a different agent
 clawprobe live --file ~/.openclaw/agents/main/sessions/sess_abc.jsonl
 ```
 

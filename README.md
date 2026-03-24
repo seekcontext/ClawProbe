@@ -146,39 +146,34 @@ clawprobe top --agent coder    # target a specific agent
 
 ### `clawprobe live` — Real-Time Activity Stream
 
-Open it in a side terminal to watch every tool call as it happens — not a refreshing dashboard, but a **live append-only feed** of exactly what the agent is doing: which files it's reading, which commands it's running, when it's thinking, and when a turn completes.
+Run it in a side terminal: each turn has a header (optional user preview), a wait line that matches your session (`waiting for assistant…` vs `reasoning (pending)…`), tool calls, **`└─ ok` / `└─ error`** result lines with duration and exit code when the transcript includes them, then **`done`** with tokens. Model and thinking level come from `session_meta` lines in the JSONL.
 
 ```
 $ clawprobe live
 
-clawprobe live  ─  agent:main:workspace:…  ─  moonshot/kimi-k2.5   q to quit
+  16:41:02  ◆  model moonshot/kimi-k2.5  ·  thinking off
 
-─── Turn 1  03/24 16:41 ─────────────────────────────────────────────────────
-  💭 thinking…
-  📖 Read           src/auth/middleware.ts
-  ✏️  Edit           src/auth/middleware.ts
-  📖 Read           src/auth/token.ts
-  ✏️  Edit           src/auth/token.ts
-  💻 Bash           npm test
-  ⚠  Bash failed — exit code 1
-  💻 Bash           npm test -- --filter auth
-  ✓  Turn done      +1,247 tokens out
-
-─── Turn 2  03/24 16:43 ─────────────────────────────────────────────────────
-  💭 thinking…
-  📖 Read           src/auth/token.ts
+  16:41:10  ● Turn 1
+            …  waiting for assistant…
+  16:41:12  📖 read            SKILL.md
+            └─ ok  15.2s  exit 0
+  16:41:28  💻 exec            curl wttr.in/…
+            └─ ok  0.6s  exit 0
+  16:41:29  ● done  +263 tok
 ```
 
 Unlike `clawprobe top` (periodic full-screen refresh), `live` is chronological and scrollable — you can scroll back to see what happened earlier in the session.
 
 ```bash
-clawprobe live                   # watch the active session from now
-clawprobe live --history         # replay all turns from session start
-clawprobe live --agent coder     # target a specific agent
-clawprobe live --file <path>     # watch a specific .jsonl transcript
+clawprobe live                         # watch the active session from now
+clawprobe live --history               # replay from session start
+clawprobe live --density compact       # tools only; hide successful result lines
+clawprobe live --density verbose       # + stopReason, tool call ids, result previews
+clawprobe live --plain                 # ASCII-friendly (no emoji)
+clawprobe live --file <path>           # watch a specific .jsonl transcript
 ```
 
-`q` or `Ctrl+C` to quit.
+Interactive keys: **`+` / `-`** cycle density, **`h`** help, **`q`** or **`Ctrl+C`** quit.
 
 ---
 

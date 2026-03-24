@@ -386,14 +386,32 @@ program
 // --- live ---
 program
   .command("live")
-  .description("Stream real-time agent activity — see every tool call as it happens")
+  .description(
+    "Stream real-time agent activity — Claude Code–style timeline (tools, results, honest wait states)"
+  )
   .option("--agent <name>", "Target agent")
   .option("--history", "Replay turns from the beginning of the current session")
   .option("--file <path>", "Watch a specific .jsonl transcript file")
+  .option(
+    "--density <mode>",
+    "Output density: compact | normal | verbose",
+    "normal"
+  )
+  .option("--plain", "ASCII-friendly output (no emoji; minimal styling)")
   .action(async (opts) => {
     const cfg = resolveConfig();
     assertOpenClawExists(cfg);
-    await runLive(cfg, opts);
+    const density = opts.density as string;
+    if (!["compact", "normal", "verbose"].includes(density)) {
+      console.error(
+        `Error: --density must be compact, normal, or verbose (got: ${density})`
+      );
+      process.exit(1);
+    }
+    await runLive(cfg, {
+      ...opts,
+      density: density as "compact" | "normal" | "verbose",
+    });
   });
 
 // --- schema ---

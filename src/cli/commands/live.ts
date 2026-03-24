@@ -14,10 +14,67 @@ import {
 } from "../../core/live-stream.js";
 import { LOCAL_TZ } from "../format.js";
 
+export type LiveDensity = "compact" | "normal" | "verbose";
+
 interface LiveOptions {
   agent?: string;
   history?: boolean;
   file?: string;
+  density?: LiveDensity;
+  plain?: boolean;
+}
+
+interface LiveGlyphs {
+  turn: string;
+  done: string;
+  compact: string;
+  subagent: string;
+  tree: string;
+  reasoning: string;
+  awaiting: string;
+}
+
+function glyphsFor(plain: boolean): LiveGlyphs {
+  if (plain) {
+    return {
+      turn: "*",
+      done: "+",
+      compact: "#",
+      subagent: ">",
+      tree: "+--",
+      reasoning: "~",
+      awaiting: "...",
+    };
+  }
+  return {
+    turn: "●",
+    done: "●",
+    compact: "◆",
+    subagent: "◇",
+    tree: "└─",
+    reasoning: "·",
+    awaiting: "…",
+  };
+}
+
+function toolIcon(name: string, plain: boolean): string {
+  if (plain) {
+    const map: Record<string, string> = {
+      read: "[R]",
+      write: "[W]",
+      edit: "[E]",
+      exec: "[$]",
+      glob: "[G]",
+      web_search: "[S]",
+      web_fetch: "[U]",
+      memory_search: "[M]",
+      memory_get: "[m]",
+      message: "[@]",
+      sessions_spawn: "[A]",
+    };
+    return map[name] ?? "[?]";
+  }
+  return getToolIcon(name);
 }
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
@@ -38,73 +95,150 @@ function fmtTokens(n: number): string {
   return String(n);
 }
 
-// ── Event renderer ────────────────────────────────────────────────────────────
+function fmtDuration(ms: number | undefined): string {
+  if (ms == null || ms < 0) return "";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.round(ms)}ms`;
+}
 
-/**
- * Returns the string to print for a given LiveEvent, or null to skip.
- * The W parameter is the terminal width for truncating long summaries.
- */
-function renderEvent(event: LiveEvent, W: number): string | null {
+// ── Event renderer ─────────────────────────────────────────────────────────────
+
+interface RenderOpts {
+  W: number;
+  density: LiveDensity;
+  plain: boolean;
+  color: boolean;
+  glyphs: LiveGlyphs;
+}
+
+function renderEvent(event: LiveEvent, o: RenderOpts): string | null {
   const time = fmtTime(event.timestamp);
-  // Invisible padding matching the time string length for continuation lines
   const pad = " ".repeat(time.length);
+  const dim = (s: string) => (o.color ? chalk.dim(s) : s);
+  const bold = (s: string) => (o.color ? chalk.bold(s) : s);
+  const cyan = (s: string) => (o.color ? chalk.cyan(s) : s);
+  const green = (s: string) => (o.color ? chalk.green(s) : s);
+  const red = (s: string) => (o.color ? chalk.red(s) : s);
+  const yellow = (s: string) => (o.color ? chalk.yellow(s) : s);
+  const magenta = (s: string) => (o.color ? chalk.magenta(s) : s);
 
   switch (event.kind) {
-    case "turn_start":
-      return (
-        "\n" +
-        chalk.bold(`  ${time}  ● Turn ${event.turnIndex ?? "?"}`)
-      );
-
-    case "thinking":
-      if (event.thinkingContent) {
-        // Actual thinking content from JSONL — show a snippet
-        const maxLen = Math.max(20, W - 14);
-        const snippet = event.thinkingContent.slice(0, maxLen);
-        return chalk.dim(`  ${time}  💭 ${snippet}`);
-      }
-      // Speculative indicator — model is thinking but hasn't written to JSONL yet
-      return chalk.dim(`  ${pad}  🤔 thinking...`);
-
-    case "tool_call": {
-      const icon = getToolIcon(event.tool ?? "");
-      const nameRaw = event.tool ?? "unknown";
-      // Pad to align summaries: use 16 chars to accommodate OpenClaw names like "memory_search"
-      const PAD = 16;
-      const namePadded = nameRaw + " ".repeat(Math.max(0, PAD - nameRaw.length));
-      const name = chalk.cyan(namePadded);
-      const maxSummaryLen = Math.max(15, W - (10 + PAD + 6));
-      const summary = event.toolSummary
-        ? chalk.dim(event.toolSummary.slice(0, maxSummaryLen))
-        : "";
-      return `  ${time}  ${icon} ${name}${summary}`;
+    case "session_meta": {
+      const parts: string[] = [];
+      if (event.model) parts.push(`model ${event.model}`);
+      if (event.thinkingLevel)
+        parts.push(`thinking ${event.thinkingLevel}`);
+      if (parts.length === 0) return null;
+      return dim(`  ${time}  ${o.glyphs.compact}  ${parts.join("  ·  ")}`);
     }
 
-    case "tool_result":
-      // Only surface errors — success is implicit and would be too noisy
-      if (event.toolError) {
-        return chalk.red(`  ${pad}                  ✗  error`);
+    case "turn_start": {
+      const lines: string[] = [];
+      const head =
+        o.density === "compact"
+          ? `\n${bold(`  ${time}  ${o.glyphs.turn} T${event.turnIndex ?? "?"}`)}`
+          : `\n${bold(
+              `  ${time}  ${o.glyphs.turn} Turn ${event.turnIndex ?? "?"}`
+            )}`;
+      lines.push(head);
+      if (
+        o.density !== "compact" &&
+        event.userPreview &&
+        event.userPreview.length > 0
+      ) {
+        const maxU = Math.max(24, o.W - 8);
+        lines.push(dim(`  ${pad}  ${event.userPreview.slice(0, maxU)}`));
       }
-      return null;
+      return lines.join("\n");
+    }
+
+    case "thinking": {
+      if (event.thinkingContent) {
+        const maxLen = Math.max(20, o.W - 18);
+        const snippet = event.thinkingContent.slice(0, maxLen);
+        const prefix = o.plain ? `${o.glyphs.reasoning} ` : "· ";
+        return dim(`  ${time}  ${prefix}${snippet}`);
+      }
+      if (event.pendingKind === "reasoning_pending") {
+        return dim(
+          `  ${pad}  ${o.glyphs.awaiting}  reasoning (pending)…`
+        );
+      }
+      if (event.pendingKind === "awaiting") {
+        return dim(
+          `  ${pad}  ${o.glyphs.awaiting}  waiting for assistant…`
+        );
+      }
+      return dim(`  ${pad}  ${o.glyphs.awaiting}  waiting…`);
+    }
+
+    case "tool_call": {
+      const icon = toolIcon(event.tool ?? "", o.plain);
+      const nameRaw = event.tool ?? "unknown";
+      const PAD = 16;
+      const namePadded =
+        nameRaw + " ".repeat(Math.max(0, PAD - nameRaw.length));
+      const name = cyan(namePadded);
+      const maxSummaryLen = Math.max(15, o.W - (10 + PAD + 8));
+      const summary = event.toolSummary
+        ? dim(event.toolSummary.slice(0, maxSummaryLen))
+        : "";
+      const idSuffix =
+        o.density === "verbose" && event.toolCallId
+          ? dim(`  ${event.toolCallId}`)
+          : "";
+      return `  ${time}  ${icon} ${name}${summary}${idSuffix}`;
+    }
+
+    case "tool_result": {
+      if (event.toolError) {
+        const dur = fmtDuration(event.durationMs);
+        const durPart = dur ? `  ${dur}` : "";
+        const ex =
+          event.exitCode != null ? `  exit ${event.exitCode}` : "";
+        return red(`  ${pad}  ${o.glyphs.tree} error${durPart}${ex}`);
+      }
+      if (o.density === "compact") return null;
+      const dur = fmtDuration(event.durationMs);
+      const durPart = dur ? dim(`  ${dur}`) : "";
+      const ex =
+        event.exitCode != null ? dim(`  exit ${event.exitCode}`) : "";
+      const ok = o.color ? chalk.greenBright("ok") : "ok";
+      let line = `  ${pad}  ${o.glyphs.tree} ${ok}${durPart}${ex}`;
+      if (o.density === "verbose" && event.resultPreview) {
+        const maxR = Math.max(20, o.W - 12);
+        line += `\n  ${pad}      ${dim(event.resultPreview.slice(0, maxR))}`;
+      }
+      return line;
+    }
 
     case "turn_end": {
       const toks = event.tokensOut
-        ? chalk.dim(`  +${fmtTokens(event.tokensOut)} tok`)
+        ? dim(`  +${fmtTokens(event.tokensOut)} tok`)
         : "";
-      return chalk.green(`  ${time}  ● done${toks}`);
+      const sr =
+        o.density === "verbose" && event.stopReason
+          ? dim(`  ${event.stopReason}`)
+          : "";
+      return green(`  ${time}  ${o.glyphs.done} done${toks}${sr}`);
     }
 
     case "compaction":
-      return chalk.yellow(`  ${time}  ◆ compact  (context summarized)`);
+      return yellow(
+        `  ${time}  ${o.glyphs.compact} compact  (context summarized)`
+      );
 
     case "subagent_start": {
       const summary = event.toolSummary
-        ? chalk.dim(`  ${event.toolSummary.slice(0, Math.max(15, W - 38))}`)
+        ? dim(
+            `  ${event.toolSummary.slice(0, Math.max(15, o.W - 40))}`
+          )
         : "";
-      return chalk.magenta(`  ${time}  🤖 subagent${summary}`);
+      return magenta(
+        `  ${time}  ${o.glyphs.subagent} subagent${summary}`
+      );
     }
 
-    // session_start is printed as a header block by the main loop
     case "session_start":
       return null;
 
@@ -118,32 +252,39 @@ function renderEvent(event: LiveEvent, W: number): string | null {
 function printSessionHeader(
   sessionKey: string,
   jsonlPath: string,
-  W: number
+  W: number,
+  color: boolean
 ): void {
-  const hr = chalk.dim("─".repeat(W));
+  const hr = color ? chalk.dim("─".repeat(W)) : "─".repeat(W);
   const maxKeyLen = W - 14;
   const shortKey =
     sessionKey.length > maxKeyLen
       ? sessionKey.slice(0, maxKeyLen - 3) + "…"
       : sessionKey;
   const fileName = path.basename(jsonlPath);
+  const b = (s: string) => (color ? chalk.bold(s) : s);
+  const d = (s: string) => (color ? chalk.dim(s) : s);
 
   console.log(hr);
-  console.log(`  ${chalk.bold("Session:")} ${chalk.dim(shortKey)}`);
-  console.log(chalk.dim(`  file: ${fileName}`));
+  console.log(`  ${b("Session:")} ${d(shortKey)}`);
+  console.log(d(`  file: ${fileName}`));
   console.log(hr);
 }
 
-// ── Main command ──────────────────────────────────────────────────────────────
+// ── Main command ─────────────────────────────────────────────────────────────
 
 export async function runLive(
   cfg: ResolvedConfig,
   opts: LiveOptions
 ): Promise<void> {
   const W = process.stdout.columns || 80;
-  const hr = chalk.dim("─".repeat(W));
+  const color =
+    !!opts.plain ? false : !process.env["NO_COLOR"] && process.stdout.isTTY;
+  let density: LiveDensity = opts.density ?? "normal";
+  const plain = !!opts.plain;
 
-  // Title bar
+  const hr = color ? chalk.dim("─".repeat(W)) : "─".repeat(W);
+
   const nowStr = new Intl.DateTimeFormat("en-US", {
     timeZone: LOCAL_TZ,
     year: "numeric",
@@ -157,30 +298,29 @@ export async function runLive(
     .format(new Date())
     .replace(",", "");
 
-  const titleText = "clawprobe live  streaming  (q / Ctrl+C to quit)";
+  const titleText =
+    "clawprobe live  (+/- density · h help · q quit)";
   const titlePad = Math.max(0, W - titleText.length - nowStr.length);
-  console.log(
-    chalk.bold("clawprobe live") +
-      chalk.dim("  streaming  (q / Ctrl+C to quit)") +
-      " ".repeat(titlePad) +
-      chalk.dim(nowStr)
-  );
+  const title =
+    (color ? chalk.bold("clawprobe live") : "clawprobe live") +
+    (color
+      ? chalk.dim("  (+/- density · h help · q quit)")
+      : "  (+/- density · h help · q quit)") +
+    " ".repeat(titlePad) +
+    (color ? chalk.dim(nowStr) : nowStr);
+  console.log(title);
   console.log(hr);
   console.log();
 
-  // ── Resolve JSONL path ──────────────────────────────────────────────────────
-
   let jsonlPath: string | null = null;
 
-  // Explicit --file override
   if (opts.file) {
     if (!fs.existsSync(opts.file)) {
-      console.error(chalk.red(`Error: file not found: ${opts.file}`));
+      console.error(color ? chalk.red(`Error: file not found: ${opts.file}`) : `Error: file not found: ${opts.file}`);
       process.exit(1);
     }
     jsonlPath = opts.file;
   } else {
-    // Auto-detect: prefer sessions.json active session, fall back to most recent file
     const sessionEntry = getActiveSession(cfg.sessionsDir);
     if (sessionEntry) {
       jsonlPath = findJsonlPath(cfg.sessionsDir, sessionEntry);
@@ -192,30 +332,35 @@ export async function runLive(
 
   if (!jsonlPath) {
     console.log(
-      chalk.dim(
-        "  No active session found.\n" +
-          "  Start OpenClaw, send a message, then run clawprobe live again."
-      )
+      color
+        ? chalk.dim(
+            "  No active session found.\n" +
+              "  Start OpenClaw, send a message, then run clawprobe live again."
+          )
+        : "  No active session found.\n  Start OpenClaw, send a message, then run clawprobe live again."
     );
     return;
   }
 
-  // Determine session key for display
   const sessionEntry = getActiveSession(cfg.sessionsDir);
   const displayKey =
     sessionEntry?.sessionKey ?? path.basename(jsonlPath, ".jsonl");
 
-  printSessionHeader(displayKey, jsonlPath, W);
+  printSessionHeader(displayKey, jsonlPath, W, color);
 
   if (opts.history) {
-    console.log(chalk.dim("  (replaying history…)\n"));
+    console.log(
+      color ? chalk.dim("  (replaying history…)\n") : "  (replaying history…)\n"
+    );
   } else {
     console.log(
-      chalk.dim("  Watching for new events. Start an OpenClaw turn to see activity.\n")
+      color
+        ? chalk.dim(
+            "  Watching for new events. Claude Code–style timeline: tools show results; thinking only when enabled.\n"
+          )
+        : "  Watching for new events.\n"
     );
   }
-
-  // ── Keyboard: quit on 'q' or Ctrl+C ────────────────────────────────────────
 
   const controller = new AbortController();
 
@@ -227,8 +372,31 @@ export async function runLive(
       } catch { /* ignore */ }
     }
     process.stdin.pause();
-    console.log("\n" + chalk.dim("  stopped."));
+    console.log("\n" + (color ? chalk.dim("  stopped.") : "  stopped."));
     process.exit(0);
+  }
+
+  function cycleDensity(dir: 1 | -1) {
+    const order: LiveDensity[] = ["compact", "normal", "verbose"];
+    const i = order.indexOf(density);
+    const next = (i + dir + order.length) % order.length;
+    density = order[next]!;
+    const label = color
+      ? chalk.dim(`  [density: ${density}]`)
+      : `  [density: ${density}]`;
+    console.log(label);
+  }
+
+  function printHelp() {
+    const lines = [
+      "  h, ?   this help",
+      "  +      more verbose (compact → normal → verbose)",
+      "  -      less verbose",
+      "  q      quit",
+    ];
+    for (const L of lines) {
+      console.log(color ? chalk.dim(L) : L);
+    }
   }
 
   if (process.stdin.isTTY) {
@@ -237,23 +405,31 @@ export async function runLive(
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (key: string) => {
       if (key === "q" || key === "\u0003") quit();
+      if (key === "+" || key === "=") cycleDensity(1);
+      if (key === "-" || key === "_") cycleDensity(-1);
+      if (key === "h" || key === "?" || key === "H") printHelp();
     });
   }
 
   process.on("SIGINT", quit);
   process.on("SIGTERM", quit);
 
-  // ── Stream loop ─────────────────────────────────────────────────────────────
-
   await startLiveStream(
     jsonlPath,
     (event: LiveEvent) => {
-      const line = renderEvent(event, W);
+      const glyphs = glyphsFor(plain);
+      const line = renderEvent(event, {
+        W,
+        density,
+        plain,
+        color,
+        glyphs,
+      });
       if (line !== null) {
         console.log(line);
       }
     },
     controller.signal,
-    !opts.history  // skipHistory = true unless --history flag is set
+    !opts.history
   );
 }
