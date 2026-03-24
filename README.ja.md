@@ -4,14 +4,14 @@
 
 トークン使用量・API コスト・コンテキスト健全性・スマートアラート —— すべてを一箇所で、OpenClaw のコードを一切変更せずに。
 
-<p align="center">
-  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
-</p>
-
 [![npm](https://img.shields.io/npm/v/clawprobe)](https://www.npmjs.com/package/clawprobe)
 [![npm downloads](https://img.shields.io/npm/dm/clawprobe)](https://www.npmjs.com/package/clawprobe)
 [![GitHub Stars](https://img.shields.io/github/stars/seekcontext/ClawProbe)](https://github.com/seekcontext/ClawProbe)
 [![License](https://img.shields.io/github/license/seekcontext/ClawProbe)](./LICENSE)
+
+<p align="center">
+  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
+</p>
 
 clawprobe が役に立ったと感じたら、[GitHub](https://github.com/seekcontext/ClawProbe) で ⭐ を付けていただけると励みになります！
 

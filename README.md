@@ -4,14 +4,14 @@
 
 Token usage. API cost. Context health. Smart alerts. All in one place — without touching a single line of OpenClaw's internals.
 
-<p align="center">
-  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
-</p>
-
 [![npm](https://img.shields.io/npm/v/clawprobe)](https://www.npmjs.com/package/clawprobe)
 [![npm downloads](https://img.shields.io/npm/dm/clawprobe)](https://www.npmjs.com/package/clawprobe)
 [![GitHub Stars](https://img.shields.io/github/stars/seekcontext/ClawProbe)](https://github.com/seekcontext/ClawProbe)
 [![License](https://img.shields.io/github/license/seekcontext/ClawProbe)](./LICENSE)
+
+<p align="center">
+  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
+</p>
 
 If you find clawprobe useful, please consider giving it a ⭐ on [GitHub](https://github.com/seekcontext/ClawProbe) — it really helps!
 
