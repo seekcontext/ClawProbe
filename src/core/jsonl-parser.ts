@@ -91,6 +91,10 @@ export interface TurnStats {
   stopReason: string;
   isError: boolean;
   toolCallCount: number;
+  /** Ordered list of tool names called this turn (may contain duplicates) */
+  tools: string[];
+  /** Seconds from preceding user message to this assistant response; undefined if unknown */
+  durationSec?: number;
 }
 
 // --- Tool / Todo / Agent tracking ---
@@ -278,6 +282,9 @@ export function parseSessionStats(filePath: string): SessionStats | null {
   let compactionCount = 0;
   const turns: TurnStats[] = [];
 
+  // Track last user message timestamp for per-turn duration calculation
+  let lastUserTs = 0;
+
   // Tool/Todo/Agent tracking
   const toolMap = new Map<string, ToolStat>();
   // Map from toolCall id → tool name, used to correlate toolResult errors
@@ -334,6 +341,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
 
     if (role === "user") {
       userTurns++;
+      lastUserTs = entrySec > 0 ? entrySec : lastUserTs;
       continue;
     }
 
@@ -374,6 +382,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
       // Parse tool calls from content
       const content = msg["content"] as unknown[] | undefined ?? [];
       let turnToolCalls = 0;
+      const turnTools: string[] = [];
 
       for (const block of content) {
         const b = block as Record<string, unknown>;
@@ -383,6 +392,7 @@ export function parseSessionStats(filePath: string): SessionStats | null {
         const toolName = (b["name"] as string | undefined) ?? "unknown";
         const toolId   = (b["id"]   as string | undefined);
         const toolInput = b["input"] as Record<string, unknown> | undefined;
+        turnTools.push(toolName);
 
         // Register id→name mapping for error correlation
         if (toolId) toolCallIdMap.set(toolId, toolName);
@@ -466,6 +476,9 @@ export function parseSessionStats(filePath: string): SessionStats | null {
 
         const msgTs = (msg["timestamp"] as number | undefined);
         const turnTs = msgTs ? Math.floor(msgTs / 1000) : entrySec;
+        const durationSec = lastUserTs > 0 && turnTs > lastUserTs
+          ? turnTs - lastUserTs
+          : undefined;
 
         turns.push({
           turnIndex: assistantTurns,
@@ -476,6 +489,8 @@ export function parseSessionStats(filePath: string): SessionStats | null {
           stopReason,
           isError: false,
           toolCallCount: turnToolCalls,
+          tools: turnTools,
+          durationSec,
         });
       }
     }

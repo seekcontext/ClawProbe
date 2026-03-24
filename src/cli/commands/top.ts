@@ -57,6 +57,69 @@ function costPlain(usd: number): string {
   return `$${usd.toFixed(usd < 0.01 ? 4 : 2)}`;
 }
 
+
+function fmtDuration(sec: number | undefined): string {
+  if (sec === undefined || sec <= 0) return "--";
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `${m}m${s}s` : `${m}m`;
+}
+
+/**
+ * Summarise the tools called in a single turn into a compact string that fits
+ * within `maxWidth` visible characters.  Consecutive duplicates are collapsed
+ * with a "×N" suffix (e.g. "Shell×3").  Any tools that don't fit are shown as
+ * "+N more".  The compact / latest badge is appended after the tool list.
+ */
+function fmtTurnTools(
+  tools: string[],
+  compactOccurred: boolean,
+  isLatest: boolean,
+  maxWidth: number,
+): string {
+  // Collapse consecutive duplicates
+  const parts: string[] = [];
+  for (const name of tools) {
+    const last = parts[parts.length - 1];
+    if (last && last.startsWith(name)) {
+      const match = last.match(/×(\d+)$/);
+      if (match) {
+        parts[parts.length - 1] = `${name}×${Number(match[1]) + 1}`;
+      } else {
+        parts[parts.length - 1] = `${name}×2`;
+      }
+    } else {
+      parts.push(name);
+    }
+  }
+
+  const badge = compactOccurred ? "◆compact" : isLatest ? "←latest" : "";
+
+  // Greedily include parts until we run out of width
+  const budgetForTools = badge ? maxWidth - badge.length - 1 : maxWidth;
+  let built = "";
+  let shown = 0;
+  for (const part of parts) {
+    const sep = built.length > 0 ? " " : "";
+    if (built.length + sep.length + part.length <= budgetForTools) {
+      built += sep + part;
+      shown++;
+    } else {
+      break;
+    }
+  }
+  const remaining = parts.length - shown;
+  if (remaining > 0) {
+    built += ` +${remaining}`;
+  }
+
+  if (badge) {
+    return built.length > 0 ? `${built} ${badge}` : badge;
+  }
+  return built;
+}
+
 // ── Layout constants ──────────────────────────────────────────────────────────
 
 /**
@@ -212,10 +275,15 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
   writeLine(13, hr);
 
   // ── Rows 14–15: turns heading + column header ─────────────────────────────
+  // Column layout: Turn(6) Time(8) Dur(7) ΔIn(9) ΔOut(9) Cost(10) Tools(rest)
+  // Prefix width (2 indent + fixed cols): 2 + 6 + 8 + 7 + 9 + 9 + 10 = 51
+  const FIXED_PREFIX = 51;
+  const toolsWidth = Math.max(12, W - FIXED_PREFIX);
+
   writeLine(14, chalk.bold("  Recent turns"));
   writeLine(15,
-    chalk.dim("  " + ["Turn", "Time", "ΔInput", "ΔOutput", "Cost", "Note"]
-      .map((h, i) => h.padEnd([6, 10, 9, 9, 12, 0][i]!))
+    chalk.dim("  " + ["Turn", "Time", "Dur", "ΔInput", "ΔOutput", "Cost", "Tools"]
+      .map((h, i) => h.padEnd([6, 8, 7, 9, 9, 10, 0][i]!))
       .join(""))
   );
 
@@ -233,16 +301,18 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
       ? new Intl.DateTimeFormat("en-US", { timeZone: LOCAL_TZ, hour: "2-digit", minute: "2-digit", hour12: false })
           .format(new Date(turn.timestamp * 1000))
       : "--:--";
-    const note = turn.compactOccurred
-      ? chalk.cyan("◆ compact")
-      : isLatest ? chalk.dim("← latest") : "";
+
+    const durStr    = fmtDuration(turn.durationSec);
+    const toolsStr  = fmtTurnTools(turn.tools ?? [], turn.compactOccurred, isLatest, toolsWidth);
+
     const line = "  " + [
       String(turn.turnIndex).padEnd(6),
-      timeStr.padEnd(10),
+      timeStr.padEnd(8),
+      durStr.padEnd(7),
       fmtTokens(turn.inputTokensDelta).padEnd(9),
       fmtTokens(turn.outputTokensDelta).padEnd(9),
-      costPlain(turn.estimatedUsd).padEnd(12),
-      note,
+      costPlain(turn.estimatedUsd).padEnd(10),
+      toolsStr,
     ].join("");
     writeLine(turnAreaStart + idx, isLatest ? chalk.white(line) : chalk.dim(line));
   });

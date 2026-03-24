@@ -151,6 +151,10 @@ export interface TurnCost {
   outputTokensDelta: number;
   estimatedUsd: number;
   compactOccurred: boolean;
+  /** Ordered list of tool names called this turn */
+  tools: string[];
+  /** Seconds from preceding user message to this assistant response */
+  durationSec?: number;
 }
 
 export function estimateCost(
@@ -220,6 +224,7 @@ export function getSessionCost(
       outputTokensDelta: outDelta,
       estimatedUsd: estimateCost({ input: inDelta, output: outDelta }, model, customPrices),
       compactOccurred,
+      tools: [],
     });
   }
 
@@ -301,6 +306,8 @@ export function getSessionCostFromJsonl(
       customPrices
     ),
     compactOccurred: false,
+    tools: t.tools,
+    durationSec: t.durationSec,
   }));
 
   // Total cost = sum of per-turn costs (each turn bills its own input context + output)
