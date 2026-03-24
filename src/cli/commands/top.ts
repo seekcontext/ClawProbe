@@ -70,12 +70,13 @@ function fmtDuration(sec: number | undefined): string {
  * Summarise the tools called in a single turn into a compact string that fits
  * within `maxWidth` visible characters.  Consecutive duplicates are collapsed
  * with a "×N" suffix (e.g. "Shell×3").  Any tools that don't fit are shown as
- * "+N more".  The compact / latest badge is appended after the tool list.
+ * "+N more".  A "◆compact" badge is appended when a compaction occurred.
+ * The latest-turn indicator is intentionally omitted — the row is already
+ * rendered in white, which provides sufficient visual distinction.
  */
 function fmtTurnTools(
   tools: string[],
   compactOccurred: boolean,
-  isLatest: boolean,
   maxWidth: number,
 ): string {
   // Collapse consecutive duplicates
@@ -94,10 +95,10 @@ function fmtTurnTools(
     }
   }
 
-  const badge = compactOccurred ? "◆compact" : isLatest ? "←latest" : "";
+  const badge = compactOccurred ? " ◆compact" : "";
 
   // Greedily include parts until we run out of width
-  const budgetForTools = badge ? maxWidth - badge.length - 1 : maxWidth;
+  const budgetForTools = maxWidth - badge.length;
   let built = "";
   let shown = 0;
   for (const part of parts) {
@@ -114,10 +115,8 @@ function fmtTurnTools(
     built += ` +${remaining}`;
   }
 
-  if (badge) {
-    return built.length > 0 ? `${built} ${badge}` : badge;
-  }
-  return built;
+  if (built.length === 0) return chalk.dim("—") + badge;
+  return built + badge;
 }
 
 // ── Layout constants ──────────────────────────────────────────────────────────
@@ -303,7 +302,7 @@ function render(cfg: ResolvedConfig, agent: string, intervalSec: number): void {
       : "--:--";
 
     const durStr    = fmtDuration(turn.durationSec);
-    const toolsStr  = fmtTurnTools(turn.tools ?? [], turn.compactOccurred, isLatest, toolsWidth);
+    const toolsStr  = fmtTurnTools(turn.tools ?? [], turn.compactOccurred, toolsWidth);
 
     const line = "  " + [
       String(turn.turnIndex).padEnd(6),
