@@ -15,7 +15,7 @@ Token usage. API cost. Context health. Smart alerts. All in one place — withou
 
 If you find clawprobe useful, please consider giving it a ⭐ on [GitHub](https://github.com/seekcontext/ClawProbe) — it really helps!
 
-[English](./README.md) · [简体中文](./README.zh-CN.md) · [日本語](./README.ja.md)
+[English](./README.md) · [简体中文](./README.zh-CN.md)
 
 [Why clawprobe](#why-clawprobe) •
 [Quick Start](#quick-start) •
