@@ -1,12 +1,12 @@
-<p align="center">
-  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
-</p>
-
 # clawprobe
 
 **Know exactly what your OpenClaw agent is doing.**
 
 Token usage. API cost. Context health. Smart alerts. All in one place — without touching a single line of OpenClaw's internals.
+
+<p align="center">
+  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
+</p>
 
 [![npm](https://img.shields.io/npm/v/clawprobe)](https://www.npmjs.com/package/clawprobe)
 [![npm downloads](https://img.shields.io/npm/dm/clawprobe)](https://www.npmjs.com/package/clawprobe)

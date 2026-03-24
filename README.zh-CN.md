@@ -1,12 +1,12 @@
-<p align="center">
-  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
-</p>
-
 # clawprobe
 
 **实时掌握你的 OpenClaw Agent 状态。**
 
 Token 用量、API 成本、上下文健康度、智能告警 —— 一站式呈现，无需改动 OpenClaw 任何代码。
+
+<p align="center">
+  <img src="./docs/hero.jpg" alt="clawprobe — OpenClaw agent observability" width="920">
+</p>
 
 [![npm](https://img.shields.io/npm/v/clawprobe)](https://www.npmjs.com/package/clawprobe)
 [![npm downloads](https://img.shields.io/npm/dm/clawprobe)](https://www.npmjs.com/package/clawprobe)
