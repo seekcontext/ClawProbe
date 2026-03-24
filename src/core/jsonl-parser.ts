@@ -391,7 +391,8 @@ export function parseSessionStats(filePath: string): SessionStats | null {
         turnToolCalls++;
         const toolName = (b["name"] as string | undefined) ?? "unknown";
         const toolId   = (b["id"]   as string | undefined);
-        const toolInput = b["input"] as Record<string, unknown> | undefined;
+        // OpenClaw JSONL uses "arguments"; Claude/Cursor style uses "input"
+        const toolInput = (b["arguments"] ?? b["input"]) as Record<string, unknown> | undefined;
         turnTools.push(toolName);
 
         // Register id→name mapping for error correlation

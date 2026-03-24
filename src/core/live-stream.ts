@@ -235,7 +235,9 @@ export function entryToLiveEvents(
       return toolCallBlocks.map((b) => {
         const block = b as Record<string, unknown>;
         const toolName = (block["name"] as string) ?? "unknown";
-        const toolInput = (block["input"] as Record<string, unknown>) ?? {};
+        // OpenClaw JSONL stores tool args as "arguments"; Claude/Cursor style uses "input".
+        // Support both so the same code works across agents.
+        const toolInput = ((block["arguments"] ?? block["input"]) as Record<string, unknown>) ?? {};
         // Both Claude-style "Task" and OpenClaw-style "sessions_spawn" launch subagents
         const isSubagent = toolName === "Task" || toolName === "sessions_spawn";
         return {

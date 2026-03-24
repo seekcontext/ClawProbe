@@ -148,7 +148,7 @@ test('entryToLiveEvents: user message emits turn_start with incremented counter'
   assert.equal(ctx.turnCounter, 1);
 });
 
-test('entryToLiveEvents: assistant with toolCall emits tool_call events', () => {
+test('entryToLiveEvents: assistant with toolCall emits tool_call events (Claude/input style)', () => {
   const ctx = makeCtx();
   const entry: JournalEntry = {
     type: 'message',
@@ -174,6 +174,35 @@ test('entryToLiveEvents: assistant with toolCall emits tool_call events', () => 
   assert.equal(events[1]!.kind, 'tool_call');
   assert.equal(events[1]!.tool, 'Edit');
   assert.equal(events[1]!.model, 'moonshot/kimi-k2.5');
+});
+
+test('entryToLiveEvents: assistant with toolCall emits tool_call events (OpenClaw/arguments style)', () => {
+  const ctx = makeCtx();
+  const entry: JournalEntry = {
+    type: 'message',
+    id: 'a1',
+    parentId: 'u1',
+    timestamp: '2026-01-01T00:00:02Z',
+    message: {
+      role: 'assistant',
+      model: 'moonshot/kimi-k2.5',
+      content: [
+        // OpenClaw JSONL uses "arguments" not "input"
+        { type: 'toolCall', name: 'read', id: 'tc1', arguments: { path: '/workspace/src/auth.ts' } },
+        { type: 'toolCall', name: 'exec', id: 'tc2', arguments: { command: 'npm test' } },
+      ],
+    },
+    role: 'assistant',
+    content: '',
+  };
+  const events = entryToLiveEvents(entry, ctx);
+  assert.equal(events.length, 2);
+  assert.equal(events[0]!.kind, 'tool_call');
+  assert.equal(events[0]!.tool, 'read');
+  assert.equal(events[0]!.toolSummary, 'auth.ts');   // basename from path
+  assert.equal(events[1]!.kind, 'tool_call');
+  assert.equal(events[1]!.tool, 'exec');
+  assert.equal(events[1]!.toolSummary, 'npm test');  // command value
 });
 
 test('entryToLiveEvents: assistant without toolCall emits turn_end', () => {
